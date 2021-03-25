@@ -250,7 +250,7 @@ static volatile uint8_t state_left_second_round;
 									  //When failing in all tries, increase "pri_attribute.sender_num_in_receivers" until to MAX_CHILD_NUM
 
 //new node
-#define NUM_CHANNELS 2    //denoted by M in MPDC paper
+#define NUM_CHANNELS 3    //denoted by M in MPDC paper
 #define NUM_PATHS  3//denoted by N in MPDC paper 
 #define MIN_HOPS_BETWEEN_ADJCENT_NODES 4 //denoted by /sigma in MPDC paper
 
@@ -692,7 +692,7 @@ MEMB(pri_neighbor_child_memb, struct pri_neighbor_child, MAX_CHILD_BUFS);
 #endif
 
 
-#define DEBUG_JF 1 //
+#define DEBUG_JF 0 //
 #if DEBUG_JF
 //#include <stdio.h>
 #define PRTJF(...) printf(__VA_ARGS__)
@@ -831,6 +831,9 @@ pri_compower_func(uint8_t	pkt_type)
 	{
 		pri_compower.all_data_listen += current_packet.listen;
 		pri_compower.all_data_transmit += current_packet.transmit;
+	}else{
+	   pri_compower.all_ctr_listen += current_packet.listen;
+	   pri_compower.all_ctr_transmit += current_packet.transmit;
 	}
 
  	//pri_compower.all = energest_type_time(ENERGEST_TYPE_CPU) + energest_type_time(ENERGEST_TYPE_LPM);
@@ -950,6 +953,7 @@ send_nodeid_message() //只在pri_powercycle里调用
 		memcpy(packetbuf_dataptr(),&nodid_msg,sizeof(struct nodeid_msg_t));
 		data_ptr = (struct nodeid_msg_t*)packetbuf_dataptr();
 		ret_value = NETSTACK_RADIO.send(packetbuf_hdrptr(), packetbuf_totlen());
+		pri_compower_func(TYPE_NODEID);
 	}
 	//has send N nodeid message
 	return ret_value;
@@ -996,7 +1000,9 @@ send_grade2(uint16_t state_dur,uint8_t order){
 		memcpy(packetbuf_dataptr(),&grade_msg,sizeof(struct grade_msg_t));
 		data_ptr = (struct grade_msg_t*)packetbuf_dataptr();
 //		data_ptr->state_dur = state_dur;
-		ret_value = NETSTACK_RADIO.send(packetbuf_hdrptr(), packetbuf_totlen());		
+		ret_value = NETSTACK_RADIO.send(packetbuf_hdrptr(), packetbuf_totlen());
+
+		pri_compower_func(TYPE_GRADE_SINK);
 	}
 		// change channel
 	  const radio_value_t channel_t = cc2420_get_channel() - pri_attribute.channel_id;
@@ -1045,6 +1051,8 @@ send_grade() //只在pri_powercycle里调用
 		data_ptr->state_dur = now - pri_attribute.state_start;
 
 		ret_value = NETSTACK_RADIO.send(packetbuf_hdrptr(), packetbuf_totlen());
+
+		pri_compower_func(TYPE_GRADE);
 	}
 	return ret_value;
 }
@@ -2842,7 +2850,7 @@ control messages: grade/rts/cts/ack
 			
 			if(hdr_ptr->type == TYPE_GRADE_SINK)
 			{
-				pri_compower_func(TYPE_GRADE);
+				pri_compower_func(TYPE_GRADE_SINK);
 				struct grade_msg_t grade_msg;	
 				//packetbuf_set_datalen(sizeof(struct grade_msg_t)); 
 				packetbuf_hdrreduce(hdr_len);
@@ -3096,6 +3104,7 @@ control messages: grade/rts/cts/ack
 				
 			}
 			else if(hdr_ptr->type == TYPE_PROBE){
+				pri_compower_func(TYPE_PROBE); 
 				//only sensor node will recept this probe message
 				if(pri_attribute.pri_type == PRI_SENSOR){
 					PRTJF("testjf:received the probe message!!\n");
@@ -3108,6 +3117,7 @@ control messages: grade/rts/cts/ack
 			}
 			else if(hdr_ptr->type == TYPE_PROBE_R){
 				//the ack is for me~
+				pri_compower_func(TYPE_PROBE_R); 
 				if(linkaddr_cmp(packetbuf_addr(PACKETBUF_ADDR_RECEIVER), &linkaddr_node_addr)){
 					PRTJF("testjf:received the probe messag ack!!\n");
 					linkaddr_t linkaddr_t1,linkaddr_t2;
@@ -3127,6 +3137,7 @@ control messages: grade/rts/cts/ack
 				}
 			}
 			else if(hdr_ptr->type == TYPE_NODEID){
+				pri_compower_func(TYPE_NODEID); 
 				if(linkaddr_cmp(packetbuf_addr(PACKETBUF_ADDR_RECEIVER), &linkaddr_node_addr)){
 					//PRTJF("has receive my order!\n");
 					struct nodeid_msg_t nodeid_msg;	

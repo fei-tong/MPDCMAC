@@ -3,16 +3,17 @@
 set SF_list = (18 10) 
 set PROTOCOL = mpdc #两种协议进行比较
 set PGI_list = (10 20 30 40 50) #PGI表示packet generation interval，10-50秒，间隔10秒
-set Random_seed = 123377
-set Sim_times = 3 #具有相同参数的实验，所做的次数，用来去平均值
+set Random_seed = 124377
+set Sim_times = 1 #具有相同参数的实验，所做的次数，用来去平均值
 set UNIT = s
+set CHANNEL_NUM = 3
 
 # change to your own directory !!
 set CONTIKIDIR="/home/user/contiki"
 set SCRIPTDIR="/home/user/contiki/examples/PRIMAC/PRI_board_sim"
 
 
-set CSCFILENAME="PRI-MAC-1.csc"
+set CSCFILENAME="PRI-MAC-5.csc"
 
 set CSCFILE = "$SCRIPTDIR/$CSCFILENAME"
 set makefile = "$SCRIPTDIR/Makefile"
@@ -43,8 +44,12 @@ while ($Sim_times > 0)
 
 	# Get the line number of the line containing "<randomseed>"
 	set csc_randseed_key_ln = `nl -ba $CSCFILE|grep "$csc_randseed_key"|awk '{print $1}'` 
+	
+	
 	# change the value of randomseed in csc file
 	sed -i "${csc_randseed_key_ln}c <randomseed>$Random_seed</randomseed>" $CSCFILE
+	
+	echo " "
 
 	sleep 0.5s
 	set LOGSDIR="$SCRIPTDIR/logs_endless_data_mpdcBoard_$Random_seed"
@@ -77,8 +82,8 @@ while ($Sim_times > 0)
 			sleep 0.5s
 			
 			
-			set CURRENTFOLDER=${PROTOCOL}_${SF}_${PGI}${UNIT}
-			echo "here 1 "
+			set CURRENTFOLDER=${PROTOCOL}_${SF}_${CHANNEL_NUM}C_${PGI}${UNIT}
+			
 			echo $CURRENTFOLDER
 			#echo $LOGSDIR/$CURRENTFOLDER >> $OUTPUT
 			mkdir $LOGSDIR/$CURRENTFOLDER
@@ -90,14 +95,14 @@ while ($Sim_times > 0)
 			
 			cd $LOGSDIR/$CURRENTFOLDER
 			#rm -f *.*
-			echo "hha"
+			
 			#modify the cooja csc file
 			set csc_key_0_ln = `nl -ba $CSCFILE|grep "$csc_key_0"|awk '{print $1}'` # ln: line number
 			sed -i "${csc_key_0_ln}c $TIMEOUT" $CSCFILE
 			sleep 0.5s
 			cp $CSCFILE ./
 			
-			gnome-terminal -x  bash -c "java -mx512m -jar $CONTIKIDIR/tools/cooja/dist/cooja.jar -nogui="$CSCFILE" -contiki="$CONTIKIDIR"; exec bash"
+			dbus-launch gnome-terminal -x  bash -c "java -mx512m -jar $CONTIKIDIR/tools/cooja/dist/cooja.jar -nogui="$CSCFILE" -contiki="$CONTIKIDIR"; exec bash"
 			echo "this over"
 			echo " "
                 	sleep 1m
