@@ -212,7 +212,7 @@ static char pri_powercycle(struct rtimer *t, void *ptr); /*function declaration*
 #define DURSLOT		((uint32_t)(DIFS+2*CW*SIGMA+3*SIFS+DURRTS+DURCTS+DURDATA+R_END_GUARD_TIME))//+DURACK)) //3367,duration of R or T (durR=durT)
 
 #ifndef  SF
-#define SF 14 // Sleep Factor, the least value of sleep factor is 2 (sleep_factor in the paper) 
+#define SF 6 // Sleep Factor, the least value of sleep factor is 2 (sleep_factor in the paper)
 #endif
 
 /*There will be no 'T' state in the new version, but 'T' belongs to 'S'*/
@@ -958,7 +958,7 @@ send_nodeid_message() //只在pri_powercycle里调用
 		hdr_ptr->type = TYPE_NODEID;
 	}	
 	pri_attribute.cnt++;
-	printf("cnt:%u\n",pri_attribute.cnt);
+	//printf("cnt:%u\n",pri_attribute.cnt);
 	
 	nodid_msg.node_id = pri_attribute.cnt;
 	packetbuf_set_datalen(sizeof(struct nodeid_msg_t));
@@ -1031,8 +1031,8 @@ send_grade_mc(uint16_t state_dur,uint8_t order){
 	  const radio_value_t channel_t = cc2420_get_channel() - pri_attribute.channel_id;
 	  int rd;
 	  rd = NETSTACK_RADIO.set_value(RADIO_PARAM_CHANNEL, channel_t);
-	  printf("channel_t is %d. ret = %u.\t",channel_t,rd);
-	  printf("now radio channel is %u\n",cc2420_get_channel());	
+	//  printf("channel_t is %d. ret = %u.\t",channel_t,rd);
+	//  printf("now radio channel is %u\n",cc2420_get_channel());
 	return ret_value;
 }
 #endif
@@ -1232,7 +1232,7 @@ pri_schedule_powercycle_fixed(struct rtimer *r_t, rtimer_clock_t fixed_time)
 		r = rtimer_set(r_t, fixed_time, 1,(void (*)(struct rtimer *, void *))pri_powercycle, NULL);
 	    if(r != RTIMER_OK) 
 		{
-    		printf("ERROR: schedule_powercycle: could not set rtimer\n");
+    	//	printf("ERROR: schedule_powercycle: could not set rtimer\n");
     	}
 	}
 	
@@ -1493,7 +1493,7 @@ pri_powercycle(struct rtimer *r_t, void *ptr) //state of a new state
 				#if MPDC_SUPPORT && !IS_NOT_STAGGER
 					PRTJF("here mpdc support\n");
 					if(pri_attribute.pri_type == PRI_SINK){
-						printf("i am sink ,and i am sending grade message!\n");
+					//	printf("i am sink ,and i am sending grade message!\n");
 						rtimer_clock_t tt = RTIMER_NOW() - pri_attribute.state_start;
 						int n,nums = NUM_PATHS/NUM_CHANNELS;
 						if(NUM_PATHS%NUM_CHANNELS != 0) nums++;
@@ -1711,25 +1711,11 @@ pri_powercycle(struct rtimer *r_t, void *ptr) //state of a new state
 					idle = all_transmit - (pri_compower.all_ctr_transmit + pri_compower.all_data_transmit) +
 								all_listen - (pri_compower.all_ctr_listen + pri_compower.all_data_listen);				
 
-					//clock time, P(ower), grade, node address, control, data, idle, all_time, //contro ratio, data ratio, idle ratio, *all_idle_ratio*.
-					//PRT_OUTPUT_POWER("%lu P %d %d.%d %lu %lu %lu %lu\n",// radio %d.%02d%% %d.%02d%% %d.%02d%%\n",// %d.%03d%%\n", //control, data, idle
 					PRT_OUTPUT_POWER(" P %lu %lu %lu %lu\n",// radio %d.%02d%% %d.%02d%% %d.%02d%%\n",// %d.%03d%%\n", //control, data, idle
 						/*clock_time(), pri_attribute.grade, linkaddr_node_addr.u8[0], linkaddr_node_addr.u8[1],*/
 						(pri_compower.all_ctr_transmit + pri_compower.all_ctr_listen), 
 						(pri_compower.all_data_transmit + pri_compower.all_data_listen), 
-						idle, all_time);  
-					/*
-						(int)((100L * (pri_compower.all_ctr_transmit + pri_compower.all_ctr_listen)) / all_time),
-	         			(int)((10000L * (pri_compower.all_ctr_transmit + pri_compower.all_ctr_listen) / all_time) - (100L * (pri_compower.all_ctr_transmit + pri_compower.all_ctr_listen) / all_time) * 100),         			
-	         			(int)((100L * (pri_compower.all_data_transmit + pri_compower.all_data_listen)) / all_time),
-	         			(int)((10000L * (pri_compower.all_data_transmit + pri_compower.all_data_listen) / all_time) - (100L * (pri_compower.all_data_transmit + pri_compower.all_data_listen) / all_time) * 100),         			
-	         			(int)((100L * idle) / all_time),
-	         			(int)((10000L * idle / all_time) - (100L * idle / all_time) * 100));
-	         			*/
-					/*
-	         			(int)((100L * (all_transmit + all_listen)) / all_time),
-	         			(int)((10000L * (all_transmit + all_listen) / all_time) - (100L * (all_transmit + all_listen) / all_time) * 100));
-	         			*/
+						idle, all_time);
 			#endif
 				/***** start: orignial is in R state, now move to T state******************/
 				pri_attribute.has_receiver = 1;
@@ -2149,9 +2135,12 @@ pri_powercycle(struct rtimer *r_t, void *ptr) //state of a new state
 					    		//list_elem->ptr = ptr;
 					    		pri_attribute.total_data_num--;
 					    		list_add(rdc_pri_buf_list, buf_elem); // add the item "list_elem" to the start of the list
-								
 								//GDNum: Generated Data Number
-								//PRT_OUTPUT("%lu G %u.%u TotalGenNum %lu\n",clock_time(),linkaddr_node_addr.u8[0],linkaddr_node_addr.u8[1],pri_attribute.data_gen_num);
+							//	PRT_OUTPUT("%lu G %u.%u %d %lu\n",
+                              //      clock_time(),
+                               //     linkaddr_node_addr.u8[0],linkaddr_node_addr.u8[1],
+                                //    pri_attribute.grade,
+                                 //   pri_attribute.data_gen_num);
 							}else
 							{
 								//printf("1. Generation drop data, Length:%d\n",list_length(rdc_pri_buf_list));
@@ -2555,7 +2544,7 @@ static uint32_t pri_grade_proc(char node_state, uint32_t sender_state_dur)
 #if MPDC_SUPPORT
 static void
 pri_gdps_from_sink(uint32_t receiving_pkt_time, int8_t msg_grade, char msg_state, uint16_t msg_state_dur,linkaddr_t source_addr_ptr,struct grade_msg_t  grade_msg){
-		printf("pri_gdps_from_sink is called \n");
+	//	printf("pri_gdps_from_sink is called \n");
 		if(pdcadc_is_on == 0)
 		{
 			return;
@@ -2707,12 +2696,12 @@ pri_gdps_mc(uint32_t receiving_pkt_time, int8_t msg_grade, char msg_state, uint1
 static void 
 pri_gdps(uint32_t receiving_pkt_time, int8_t msg_grade, char msg_state, uint16_t msg_state_dur)//grade division and pipeline scheduling
 {
-	printf("pri_gdps is called\n");
+//	printf("pri_gdps is called\n");
 	if(pdcadc_is_on == 0)
 	{
 		return;
 	}
-	printf("rcv_grade_num_to_setgrade is %u\n",pri_attribute.rcv_grade_num_to_setgrade);
+//	printf("rcv_grade_num_to_setgrade is %u\n",pri_attribute.rcv_grade_num_to_setgrade);
 	if(pri_attribute.rcv_grade_num_to_setgrade > 0 )
 	{
 		pri_attribute.rcv_grade_num_to_setgrade -- ;
@@ -2731,10 +2720,10 @@ pri_gdps(uint32_t receiving_pkt_time, int8_t msg_grade, char msg_state, uint16_t
 			return;
 		}
 	}
-	printf("gdps here!\n");
+//	printf("gdps here!\n");
 	pri_attribute.rcv_grade_num_to_setgrade = RCV_GRADE_NUM_TO_SET;
 	pri_attribute.grade = pri_attribute.temp_grade;//finally determine the grade, and will forward a grade message
-	printf("my grade:%d.\n",pri_attribute.grade);
+//	printf("my grade:%d.\n",pri_attribute.grade);
 
 	/*************************************************/	
 	uint32_t sender_state_dur, state_dur, state_period;
@@ -2744,7 +2733,7 @@ pri_gdps(uint32_t receiving_pkt_time, int8_t msg_grade, char msg_state, uint16_t
 	//calculate the current state duration according to the GRADE-MESSAGE-PROCESSING algorithm
 	state_dur = pri_grade_proc(msg_state,sender_state_dur);
 	
-	printf("\n\nout state_dur=%lu, state:%c\n",state_dur,pri_attribute.state);
+//	printf("\n\nout state_dur=%lu, state:%c\n",state_dur,pri_attribute.state);
 
 	pri_show_led();
 	now = RTIMER_NOW();
@@ -2841,7 +2830,12 @@ pri_input_packet(void)
 							{
 								//PRT_OUTPUT("%lu R %u.%u RPID: %lu Grade: %d Latency: %ld Num: 1 TotalRcvdNum: %lu\n", 
 								PRT_OUTPUT("%lu R %u.%u %lu %d %ld %lu\n",
-								clock_time(), data_msg.src_addr.u8[0],data_msg.src_addr.u8[1],data_msg.ID,data_msg.src_grade,data_msg.delay,pri_attribute.data_rcvd_num_at_sink);
+								clock_time(),
+								data_msg.src_addr.u8[0],data_msg.src_addr.u8[1],
+								data_msg.ID,
+								data_msg.src_grade,
+								data_msg.delay,
+								pri_attribute.data_rcvd_num_at_sink);
 							}else
 							{
 								//PRT_OUTPUT("%lu R %u.%u RPID: %lu Grade: %d Latency: %ld Num: 1 TotalRcvdNum: %lu\n", 
@@ -2901,7 +2895,7 @@ control messages: grade/rts/cts/ack
 				memcpy(&grade_msg, packetbuf_dataptr(),  sizeof(struct grade_msg_t));
 				if(pri_attribute.grade<0 )
 				{
-					printf("tf rcvd a grade message.\n");
+				//	printf("tf rcvd a grade message.\n");
 					state_dur = grade_msg.state_dur;
 
 					uint8_t ord = grade_msg.order;
@@ -2930,7 +2924,7 @@ control messages: grade/rts/cts/ack
 				
 				if(pri_attribute.grade<0)
 				{
-					printf("tf rcvd a grade message.\n");
+				//	printf("tf rcvd a grade message.\n");
 					state_dur = grade_msg.state_dur;
 
 					
@@ -2993,7 +2987,7 @@ control messages: grade/rts/cts/ack
 							if(linkaddr_cmp(&pri_control.receiver_addr,&linkaddr_null))// a broadcasted RTS
 							{
 					    		//printf("received a broadcasted RTS: success_cts_to_brorts=%u.\n",list_elem->success_cts_to_brorts);
-					    		 printf("rcv bro rts\n");
+					    		// printf("rcv bro rts\n");
 					    		pri_control.rcvd_bro_rts = 1;
 							}
 
@@ -3180,7 +3174,7 @@ control messages: grade/rts/cts/ack
 					// send the order messgae
 					linkaddr_copy(&pri_control.sender_addr,packetbuf_addr(PACKETBUF_ADDR_SENDER));
 					send_nodeid_message();
-					printf("cnt:%u. NUM_PATHS:%u\n",pri_attribute.cnt,NUM_PATHS);
+				//	printf("cnt:%u. NUM_PATHS:%u\n",pri_attribute.cnt,NUM_PATHS);
 					if(pri_attribute.cnt == NUM_PATHS){
 						PRTJF("has send N nodeid message now should begin grade messgae!\n");
 						ctimer_set(&grade_start_ctimer, START_GRADE, start_grade, NULL);
