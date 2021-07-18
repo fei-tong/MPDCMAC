@@ -1,19 +1,19 @@
 #!/bin/csh
 
-set SF_list = (6) 
-set PROTOCOL = mpdc #两种协议进行比较
-set PGI_list = (10 15 20 25 30) #PGI表示packet generation interval，10-50秒，间隔10秒
-set Random_seed = 124377
+set SF_list = (18 10) 
+set PROTOCOL = mpdc 
+set PGI_list = (10 20 30 40 50) #PGI表示packet generation interval，10-50秒，间隔10秒
+set Random_seed = 123377
 set Sim_times = 1 #具有相同参数的实验，所做的次数，用来去平均值
 set UNIT = s
-set CHANNEL_NUM = 2
+set CHANNEL_NUM = 3
 
 # change to your own directory !!
 set CONTIKIDIR="/home/user/contiki"
 set SCRIPTDIR="/home/user/contiki/examples/MPDCMAC/MPDC_board_sim"
 
 
-set CSCFILENAME="MPDC-MAC-10-2c.csc"
+set CSCFILENAME="MPDC-MAC-6-2c.csc"
 
 set CSCFILE = "$SCRIPTDIR/$CSCFILENAME"
 set makefile = "$SCRIPTDIR/Makefile"
@@ -22,7 +22,7 @@ set COOJASIM = "1" # 1: YES, 0: NO
 
 # need to modify according to it's sending fixed or endless data
 set DATANUM="-1"	#send endless data
-set SIMTIME = "1200000"
+set SIMTIME = "2400000"
 
 
 # key words in $makefile
@@ -52,7 +52,7 @@ while ($Sim_times > 0)
 	echo " "
 
 	sleep 0.5s
-	set LOGSDIR="$SCRIPTDIR/mpdc_2c_$Random_seed"
+	set LOGSDIR="$SCRIPTDIR/mpdcBoard_$Random_seed"
 	@ Random_seed = $Random_seed + 1000
 	mkdir $LOGSDIR
 	

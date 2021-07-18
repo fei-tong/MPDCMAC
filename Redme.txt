@@ -1,0 +1,21 @@
+net:
+the core code of MPDC.
+MPDC source file in directory net/mac/mpdcmac ：mpdcmac.c & mpdcmac.h
+
+MPDC_board_sim:
+This directory is related to the simulations of MPDC.
+You use cooja open the file in MPDC_board_sim directory, such as MPDC-MAC-6-1c
+
+cpp :
+contiki collect protocal (CCP) related code.
+mpdc will be compared with cpp(contiki-mac)、cpp(x-mac) and cpp(null-rdc)
+
+dcpf_mpdc_simscript.sh
+The script file is used to automatically modify the parameters 
+and run the simulation to get the log files which will be processed by code in E&results directory.
+
+E&results:
+we use Matlab to get the results of simulations.
+This directory include the logs file of simulations, the Matlab code 
+which used to process related data
+and the pictures of results.

@@ -1,7 +1,7 @@
 #!/bin/csh
 
 set SF_list = (6) 
-set PROTOCOL = mpdc #两种协议进行比较
+set PROTOCOL = mpdc 
 set PGI_list = (10 15 20 25 30) #PGI表示packet generation interval，10-50秒，间隔10秒
 set Random_seed = 124377
 set Sim_times = 1 #具有相同参数的实验，所做的次数，用来去平均值
@@ -13,7 +13,7 @@ set CONTIKIDIR="/home/user/contiki"
 set SCRIPTDIR="/home/user/contiki/examples/MPDCMAC/MPDC_board_sim"
 
 
-set CSCFILENAME="MPDC-MAC-10-2c.csc"
+set CSCFILENAME="MPDC-MAC-6-2c.csc"
 
 set CSCFILE = "$SCRIPTDIR/$CSCFILENAME"
 set makefile = "$SCRIPTDIR/Makefile"

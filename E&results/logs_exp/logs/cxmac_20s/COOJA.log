@@ -1,0 +1,51 @@
+[22:31:34 - main] [Cooja.java:1324] [INFO] - > Starting Cooja
+[22:31:34 - main] [Cooja.java:2865] [INFO] - External tools default settings: /external_tools_linux.config
+[22:31:34 - main] [Cooja.java:2895] [INFO] - External tools user settings: /root/.cooja.user.properties
+[22:31:34 - main] [Simulation.java:420] [INFO] - Simulation random seed: 123377
+[22:31:34 - main] [Cooja.java:4267] [WARN] - Replaced [CONTIKI_DIR]/examples/Acollect/nullrdc/JF-collect.z1 with /home/user/contiki/examples/Acollect/nullrdc/JF-collect.z1 (default: /home/user/contiki), but could not find it. This does not have to be an error, as the file might be created later.
+[22:31:34 - main] [CompileContiki.java:140] [INFO] - > make JF-collect.z1 TARGET=z1 
+[22:31:39 - main] [MspMote.java:235] [INFO] - Loading firmware from: /home/user/contiki/examples/Acollect/nullrdc/JF-collect.z1
+[22:31:39 - main] [MspMote.java:235] [INFO] - Loading firmware from: /home/user/contiki/examples/Acollect/nullrdc/JF-collect.z1
+[22:31:39 - main] [MspMote.java:235] [INFO] - Loading firmware from: /home/user/contiki/examples/Acollect/nullrdc/JF-collect.z1
+[22:31:40 - main] [MspMote.java:235] [INFO] - Loading firmware from: /home/user/contiki/examples/Acollect/nullrdc/JF-collect.z1
+[22:31:40 - main] [MspMote.java:235] [INFO] - Loading firmware from: /home/user/contiki/examples/Acollect/nullrdc/JF-collect.z1
+[22:31:40 - main] [MspMote.java:235] [INFO] - Loading firmware from: /home/user/contiki/examples/Acollect/nullrdc/JF-collect.z1
+[22:31:40 - main] [MspMote.java:235] [INFO] - Loading firmware from: /home/user/contiki/examples/Acollect/nullrdc/JF-collect.z1
+[22:31:40 - main] [MspMote.java:235] [INFO] - Loading firmware from: /home/user/contiki/examples/Acollect/nullrdc/JF-collect.z1
+[22:31:40 - main] [MspMote.java:235] [INFO] - Loading firmware from: /home/user/contiki/examples/Acollect/nullrdc/JF-collect.z1
+[22:31:40 - main] [MspMote.java:235] [INFO] - Loading firmware from: /home/user/contiki/examples/Acollect/nullrdc/JF-collect.z1
+[22:31:40 - main] [MspMote.java:235] [INFO] - Loading firmware from: /home/user/contiki/examples/Acollect/nullrdc/JF-collect.z1
+[22:31:40 - main] [MspMote.java:235] [INFO] - Loading firmware from: /home/user/contiki/examples/Acollect/nullrdc/JF-collect.z1
+[22:31:40 - main] [MspMote.java:235] [INFO] - Loading firmware from: /home/user/contiki/examples/Acollect/nullrdc/JF-collect.z1
+[22:31:40 - main] [Cooja.java:1790] [INFO] - Visualized plugin was not started: class org.contikios.cooja.plugins.SimControl
+[22:31:40 - main] [Cooja.java:1790] [INFO] - Visualized plugin was not started: class org.contikios.cooja.plugins.Visualizer
+[22:31:40 - main] [Cooja.java:1790] [INFO] - Visualized plugin was not started: class org.contikios.cooja.plugins.LogListener
+[22:31:40 - main] [Cooja.java:1790] [INFO] - Visualized plugin was not started: class org.contikios.cooja.plugins.TimeLine
+[22:31:40 - main] [Cooja.java:1790] [INFO] - Visualized plugin was not started: class org.contikios.cooja.plugins.Notes
+[22:31:40 - main] [ScriptRunner.java:429] [INFO] - Test script deactivated
+[22:31:40 - main] [LogScriptEngine.java:265] [INFO] - Script timeout in 2400000 ms
+[22:31:40 - main] [ScriptRunner.java:386] [INFO] - Test script activated
+[22:31:40 - Thread-2] [Simulation.java:252] [INFO] - Simulation main loop started, system time: 1618000300901
+[22:32:05 - Thread-2] [LogScriptEngine.java:389] [INFO] - Test script at 5.00%, done in 473.5 sec
+[22:32:13 - Thread-2] [LogScriptEngine.java:389] [INFO] - Test script at 10.00%, done in 297.8 sec
+[22:32:35 - Thread-2] [LogScriptEngine.java:389] [INFO] - Test script at 15.00%, done in 306.9 sec
+[22:32:54 - Thread-2] [LogScriptEngine.java:389] [INFO] - Test script at 20.00%, done in 293.0 sec
+[22:33:11 - Thread-2] [LogScriptEngine.java:389] [INFO] - Test script at 25.00%, done in 271.9 sec
+[22:33:30 - Thread-2] [LogScriptEngine.java:389] [INFO] - Test script at 30.00%, done in 255.4 sec
+[22:33:49 - Thread-2] [LogScriptEngine.java:389] [INFO] - Test script at 35.00%, done in 239.0 sec
+[22:34:06 - Thread-2] [LogScriptEngine.java:389] [INFO] - Test script at 40.00%, done in 218.5 sec
+[22:34:22 - Thread-2] [LogScriptEngine.java:389] [INFO] - Test script at 45.00%, done in 198.1 sec
+[22:34:41 - Thread-2] [LogScriptEngine.java:389] [INFO] - Test script at 50.00%, done in 180.2 sec
+[22:34:59 - Thread-2] [LogScriptEngine.java:389] [INFO] - Test script at 55.00%, done in 162.9 sec
+[22:35:17 - Thread-2] [LogScriptEngine.java:389] [INFO] - Test script at 60.00%, done in 144.5 sec
+[22:35:36 - Thread-2] [LogScriptEngine.java:389] [INFO] - Test script at 65.00%, done in 127.1 sec
+[22:35:55 - Thread-2] [LogScriptEngine.java:389] [INFO] - Test script at 70.00%, done in 109.3 sec
+[22:36:15 - Thread-2] [LogScriptEngine.java:389] [INFO] - Test script at 75.00%, done in 91.5 sec
+[22:36:34 - Thread-2] [LogScriptEngine.java:389] [INFO] - Test script at 80.00%, done in 73.4 sec
+[22:36:53 - Thread-2] [LogScriptEngine.java:389] [INFO] - Test script at 85.00%, done in 55.2 sec
+[22:37:15 - Thread-2] [LogScriptEngine.java:389] [INFO] - Test script at 90.00%, done in 37.1 sec
+[22:37:32 - Thread-2] [LogScriptEngine.java:389] [INFO] - Test script at 95.00%, done in 18.5 sec
+[22:37:48 - Thread-2] [LogScriptEngine.java:375] [INFO] - Timeout event @ 2400000000
+[22:37:48 - Thread-1] [LogScriptEngine.java:309] [INFO] - Test script finished
+[22:37:48 - Thread-2] [Simulation.java:311] [INFO] - Simulation main loop stopped, system time: 1618000668013	Duration: 367113 ms	Simulated time 2400000 ms	Ratio 6.537496629103301
+[22:37:48 - AWT-EventQueue-0] [ScriptRunner.java:429] [INFO] - Test script deactivated

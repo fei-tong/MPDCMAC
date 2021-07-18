@@ -1,0 +1,1 @@
+collect.c 替换contiki中原有的collect.c文件（core/net/rime文件夹下，源文件需要备份）

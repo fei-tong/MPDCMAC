@@ -1,0 +1,53 @@
+[10:57:41 - main] [Cooja.java:1324] [INFO] - > Starting Cooja
+[10:57:41 - main] [Cooja.java:2865] [INFO] - External tools default settings: /external_tools_linux.config
+[10:57:41 - main] [Cooja.java:2895] [INFO] - External tools user settings: /root/.cooja.user.properties
+[10:57:41 - main] [Simulation.java:420] [INFO] - Simulation random seed: 124377
+[10:57:41 - main] [Cooja.java:4267] [WARN] - Replaced [CONTIKI_DIR]/examples/PRIMAC/PRI_board_sim/hello-world3.z1 with /home/user/contiki/examples/PRIMAC/PRI_board_sim/hello-world3.z1 (default: /home/user/contiki), but could not find it. This does not have to be an error, as the file might be created later.
+[10:57:41 - main] [CompileContiki.java:140] [INFO] - > make hello-world3.z1 TARGET=z1 
+[10:57:46 - main] [MspMote.java:235] [INFO] - Loading firmware from: /home/user/contiki/examples/PRIMAC/PRI_board_sim/hello-world3.z1
+[10:57:46 - main] [MspMote.java:235] [INFO] - Loading firmware from: /home/user/contiki/examples/PRIMAC/PRI_board_sim/hello-world3.z1
+[10:57:46 - main] [MspMote.java:235] [INFO] - Loading firmware from: /home/user/contiki/examples/PRIMAC/PRI_board_sim/hello-world3.z1
+[10:57:46 - main] [MspMote.java:235] [INFO] - Loading firmware from: /home/user/contiki/examples/PRIMAC/PRI_board_sim/hello-world3.z1
+[10:57:46 - main] [MspMote.java:235] [INFO] - Loading firmware from: /home/user/contiki/examples/PRIMAC/PRI_board_sim/hello-world3.z1
+[10:57:46 - main] [MspMote.java:235] [INFO] - Loading firmware from: /home/user/contiki/examples/PRIMAC/PRI_board_sim/hello-world3.z1
+[10:57:46 - main] [MspMote.java:235] [INFO] - Loading firmware from: /home/user/contiki/examples/PRIMAC/PRI_board_sim/hello-world3.z1
+[10:57:46 - main] [MspMote.java:235] [INFO] - Loading firmware from: /home/user/contiki/examples/PRIMAC/PRI_board_sim/hello-world3.z1
+[10:57:46 - main] [MspMote.java:235] [INFO] - Loading firmware from: /home/user/contiki/examples/PRIMAC/PRI_board_sim/hello-world3.z1
+[10:57:46 - main] [MspMote.java:235] [INFO] - Loading firmware from: /home/user/contiki/examples/PRIMAC/PRI_board_sim/hello-world3.z1
+[10:57:46 - main] [MspMote.java:235] [INFO] - Loading firmware from: /home/user/contiki/examples/PRIMAC/PRI_board_sim/hello-world3.z1
+[10:57:46 - main] [MspMote.java:235] [INFO] - Loading firmware from: /home/user/contiki/examples/PRIMAC/PRI_board_sim/hello-world3.z1
+[10:57:46 - main] [MspMote.java:235] [INFO] - Loading firmware from: /home/user/contiki/examples/PRIMAC/PRI_board_sim/hello-world3.z1
+[10:57:46 - main] [MspMote.java:235] [INFO] - Loading firmware from: /home/user/contiki/examples/PRIMAC/PRI_board_sim/hello-world3.z1
+[10:57:46 - main] [MspMote.java:235] [INFO] - Loading firmware from: /home/user/contiki/examples/PRIMAC/PRI_board_sim/hello-world3.z1
+[10:57:47 - main] [Cooja.java:1790] [INFO] - Visualized plugin was not started: class org.contikios.cooja.plugins.SimControl
+[10:57:47 - main] [Cooja.java:1790] [INFO] - Visualized plugin was not started: class org.contikios.cooja.plugins.Visualizer
+[10:57:47 - main] [Cooja.java:1790] [INFO] - Visualized plugin was not started: class org.contikios.cooja.plugins.LogListener
+[10:57:47 - main] [Cooja.java:1790] [INFO] - Visualized plugin was not started: class org.contikios.cooja.plugins.TimeLine
+[10:57:47 - main] [Cooja.java:1790] [INFO] - Visualized plugin was not started: class org.contikios.cooja.plugins.Notes
+[10:57:47 - main] [ScriptRunner.java:429] [INFO] - Test script deactivated
+[10:57:47 - main] [LogScriptEngine.java:265] [INFO] - Script timeout in 2400000 ms
+[10:57:47 - main] [ScriptRunner.java:386] [INFO] - Test script activated
+[10:57:47 - Thread-2] [Simulation.java:252] [INFO] - Simulation main loop started, system time: 1617008267391
+[10:58:04 - Thread-2] [LogScriptEngine.java:389] [INFO] - Test script at 5.00%, done in 331.1 sec
+[10:58:08 - Thread-2] [LogScriptEngine.java:389] [INFO] - Test script at 10.00%, done in 194.3 sec
+[10:58:13 - Thread-2] [LogScriptEngine.java:389] [INFO] - Test script at 15.00%, done in 146.3 sec
+[10:58:17 - Thread-2] [LogScriptEngine.java:389] [INFO] - Test script at 20.00%, done in 120.1 sec
+[10:58:21 - Thread-2] [LogScriptEngine.java:389] [INFO] - Test script at 25.00%, done in 102.5 sec
+[10:58:25 - Thread-2] [LogScriptEngine.java:389] [INFO] - Test script at 30.00%, done in 89.7 sec
+[10:58:30 - Thread-2] [LogScriptEngine.java:389] [INFO] - Test script at 35.00%, done in 79.3 sec
+[10:58:34 - Thread-2] [LogScriptEngine.java:389] [INFO] - Test script at 40.00%, done in 70.5 sec
+[10:58:38 - Thread-2] [LogScriptEngine.java:389] [INFO] - Test script at 45.00%, done in 62.7 sec
+[10:58:43 - Thread-2] [LogScriptEngine.java:389] [INFO] - Test script at 50.00%, done in 56.6 sec
+[10:58:48 - Thread-2] [LogScriptEngine.java:389] [INFO] - Test script at 55.00%, done in 50.1 sec
+[10:58:53 - Thread-2] [LogScriptEngine.java:389] [INFO] - Test script at 60.00%, done in 44.3 sec
+[10:58:59 - Thread-2] [LogScriptEngine.java:389] [INFO] - Test script at 65.00%, done in 38.9 sec
+[10:59:05 - Thread-2] [LogScriptEngine.java:389] [INFO] - Test script at 70.00%, done in 33.6 sec
+[10:59:11 - Thread-2] [LogScriptEngine.java:389] [INFO] - Test script at 75.00%, done in 28.1 sec
+[10:59:19 - Thread-2] [LogScriptEngine.java:389] [INFO] - Test script at 80.00%, done in 22.9 sec
+[10:59:25 - Thread-2] [LogScriptEngine.java:389] [INFO] - Test script at 85.00%, done in 17.4 sec
+[10:59:31 - Thread-2] [LogScriptEngine.java:389] [INFO] - Test script at 90.00%, done in 11.6 sec
+[10:59:37 - Thread-2] [LogScriptEngine.java:389] [INFO] - Test script at 95.00%, done in 5.8 sec
+[10:59:42 - Thread-2] [LogScriptEngine.java:375] [INFO] - Timeout event @ 2400000000
+[10:59:42 - Thread-1] [LogScriptEngine.java:309] [INFO] - Test script finished
+[10:59:42 - Thread-2] [Simulation.java:311] [INFO] - Simulation main loop stopped, system time: 1617008382994	Duration: 115603 ms	Simulated time 2400000 ms	Ratio 20.760706902070016
+[10:59:43 - AWT-EventQueue-0] [ScriptRunner.java:429] [INFO] - Test script deactivated

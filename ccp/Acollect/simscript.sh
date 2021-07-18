@@ -1,35 +1,30 @@
 #!/bin/csh
-
-set SF_list = (6) 
-set PROTOCOL = mpdc #ä¸¤ç§åè®®è¿›è¡Œæ¯”è¾ƒ
-set PGI_list = (10 15 20 25 30) #PGIè¡¨ç¤ºpacket generation intervalï¼Œ10-50ç§’ï¼Œé—´éš”10ç§’
-set Random_seed = 124377
-set Sim_times = 1 #å…·æœ‰ç›¸åŒå‚æ•°çš„å®žéªŒï¼Œæ‰€åšçš„æ¬¡æ•°ï¼Œç”¨æ¥åŽ»å¹³å‡å€¼
+set PROTOCOL = nullrdc
+set PGI_list = (10 15 20 25 30) #PGI±íÊ¾packet generation interval£¬10-50Ãë£¬¼ä¸ô10Ãë
+set Random_seed = 123377
+set Sim_times = 1 #¾ßÓÐÏàÍ¬²ÎÊýµÄÊµÑé£¬Ëù×öµÄ´ÎÊý£¬ÓÃÀ´È¥Æ½¾ùÖµ
 set UNIT = s
-set CHANNEL_NUM = 2
+
 
 # change to your own directory !!
 set CONTIKIDIR="/home/user/contiki"
-set SCRIPTDIR="/home/user/contiki/examples/MPDCMAC/MPDC_board_sim"
+set SCRIPTDIR="/home/user/contiki/examples/CCP/CCP_board_sim"
 
 
-set CSCFILENAME="MPDC-MAC-10-2c.csc"
+set CSCFILENAME="CCP-collect-2.csc"
 
 set CSCFILE = "$SCRIPTDIR/$CSCFILENAME"
 set makefile = "$SCRIPTDIR/Makefile"
 
-set COOJASIM = "1" # 1: YES, 0: NO
+
 
 # need to modify according to it's sending fixed or endless data
-set DATANUM="-1"	#send endless data
-set SIMTIME = "1200000"
+set SIMTIME = "2400000"
 
 
 # key words in $makefile
-set mf_key_0 = "TOTAL_DATA_NUM"			#target 0, to determine sending fixed number of data or endless data
-set mf_key_2 = "SF"						#target 2
-set mf_key_4 = "DATA_INTERVAL"			#target 4
-set mf_key_6 = "IS_COOJA_SIM"			#target 6
+set mf_key_1 = "RDC_DRIVER"
+set mf_key_2 = "DATA_INTERVAL"
 
 # key words in $CSCFILE
 set csc_key_0 = "TIMEOUT"
@@ -45,47 +40,35 @@ while ($Sim_times > 0)
 	# Get the line number of the line containing "<randomseed>"
 	set csc_randseed_key_ln = `nl -ba $CSCFILE|grep "$csc_randseed_key"|awk '{print $1}'` 
 	
-	
 	# change the value of randomseed in csc file
 	sed -i "${csc_randseed_key_ln}c <randomseed>$Random_seed</randomseed>" $CSCFILE
 	
 	echo " "
 
 	sleep 0.5s
-	set LOGSDIR="$SCRIPTDIR/mpdc_2c_$Random_seed"
+	set LOGSDIR="$SCRIPTDIR/CCP_Board_$Random_seed"
 	@ Random_seed = $Random_seed + 1000
 	mkdir $LOGSDIR
 	
 	sleep 0.5s	#to avoid the permission-denited issue when continuously modifying the makefile
 	
-	foreach SF($SF_list)
-		#modify makefile: sleeping factor: 10 or 18
-		set mf_key_2_ln = `nl -ba $makefile|grep "$mf_key_2 "|awk '{print $1}'`
-		sed -i "${mf_key_2_ln}c $mf_key_2 ?= $SF" $makefile
-		sleep 0.5s
 
+	foreach PROTOCOL($PROTOCOL_list)
+		#modify makefile: how many data to be sent: fixed number of endless
+		set mf_key_0_ln = `nl -ba $makefile|grep "$mf_key_0 "|awk '{print $1}'` 
+		sed -i "${mf_key_0_ln}c $mf_key_0 ?= $PROTOCOL" $makefile
+		sleep 0.5s
+			
 		foreach PGI($PGI_list)
 			#modify makefile: set packet generation interval
-			set mf_key_4_ln = `nl -ba $makefile|grep "$mf_key_4 "|awk '{print $1}'`
-			sed -i "${mf_key_4_ln}c $mf_key_4 ?= $PGI" $makefile
-			sleep 0.5s
-			
-			#modify makefile: how many data to be sent: fixed number of endless
-			set mf_key_0_ln = `nl -ba $makefile|grep "$mf_key_0 "|awk '{print $1}'` # ln: line number
-			sed -i "${mf_key_0_ln}c $mf_key_0 ?= $DATANUM" $makefile
+			set mf_key_2_ln = `nl -ba $makefile|grep "$mf_key_2 "|awk '{print $1}'`
+			sed -i "${mf_key_2_ln}c $mf_key_2 ?= $PGI" $makefile
 			sleep 0.5s
 			
 			
-			#modify makefile: is it cooja simulation?
-			set mf_key_6_ln = `nl -ba $makefile|grep "$mf_key_6 "|awk '{print $1}'` # ln: line number
-			sed -i "${mf_key_6_ln}c $mf_key_6 ?= $COOJASIM" $makefile
-			sleep 0.5s
-			
-			
-			set CURRENTFOLDER=${PROTOCOL}_${SF}_${CHANNEL_NUM}C_${PGI}${UNIT}
+			set CURRENTFOLDER=${PROTOCOL}_${PGI}${UNIT}
 			
 			echo $CURRENTFOLDER
-			#echo $LOGSDIR/$CURRENTFOLDER >> $OUTPUT
 			mkdir $LOGSDIR/$CURRENTFOLDER
 			
 			cd $SCRIPTDIR
@@ -94,7 +77,6 @@ while ($Sim_times > 0)
 			make -s TARGET=sky clean
 			
 			cd $LOGSDIR/$CURRENTFOLDER
-			#rm -f *.*
 			
 			#modify the cooja csc file
 			set csc_key_0_ln = `nl -ba $CSCFILE|grep "$csc_key_0"|awk '{print $1}'` # ln: line number
@@ -105,11 +87,12 @@ while ($Sim_times > 0)
 			dbus-launch gnome-terminal -x  bash -c "java -mx512m -jar $CONTIKIDIR/tools/cooja/dist/cooja.jar -nogui="$CSCFILE" -contiki="$CONTIKIDIR"; exec bash"
 			echo "this over"
 			echo " "
-                	sleep 1m
+            sleep 1m
 			cd $SCRIPTDIR
 		end
-	end	
+	end 
 end
 
 echo "Done (endless data)! Congratulations!"
+
 
