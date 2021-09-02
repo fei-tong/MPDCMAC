@@ -2,27 +2,15 @@
  * \file
  *		Implementation: A Multi-Channel Pipel ined Data Colle ction MAC (MPDC)
  * 		based on the PRIMAC power-saving radio duty cycling protocol
- * \author
- *		F. Jiang <fangjiangff@163.com>      
  * \date 
  *		start:	Feb. 26, 2021
  *		update:	May. 19, 2021
  *		New update: May. 19, 2021       
  * \description:
  *		Current functions: 
- *						duty-cycled, pipelined scheduleing; 
- * 						schedule synchronization; 
- *						data-gathering tree establishment and maintenance; 
- *						address-free;
- *						dynamic duty cycle: single-channel;
+ *						duty-cycled, pipelined scheduleing;
  *						multiple-channel
- */ 
- 
-#if ZOLERTIA_Z1
-#include "dev/i2cmaster.h"	// Include IC driver
-#include "dev/tmp102.h"     // Include sensor driver
-#endif    
-  
+ */
 #include "contiki-conf.h"
 #include "dev/leds.h"
 #include "dev/radio.h"
@@ -35,19 +23,30 @@
 #include "sys/pt.h"
 #include "sys/rtimer.h"  
 #include "sys/energest.h" 
-#include <math.h>   
-   
+#include <math.h>
 #include <string.h>   
 #include <stdio.h>    
-       
-/*  
-#if NETSTACK_RDC_CHANNEL_CHECK_RATE >= 64
-#undef WITH_PHASE_OPTIMIZATION
-#define WITH_PHASE_OPTIMIZATION 0  
-#endif     
-*/            
-  
-/* CYCLE_TIME for channel cca checks, in rtimer ticks. */
+
+
+#ifndef ZOLERTIA_Z1
+#define ZOLERTIA_Z1 0
+#endif
+
+#ifndef ZOLERTIA_RE
+#define ZOLERTIA_RE 0
+#endif
+
+
+
+#if ZOLERTIA_Z1
+#include "dev/i2cmaster.h"	// Include IC driver
+#include "dev/tmp102.h"     // Include sensor driver
+#endif   
+
+#if ZOLERTIA_RE 
+#include "dev/tmp102.h"
+#endif
+
 #ifdef CONTIKIMAC_CONF_CYCLE_TIME
 #define CYCLE_TIME (CONTIKIMAC_CONF_CYCLE_TIME)
 #else
@@ -70,25 +69,22 @@
 		uint32_t	all_data_transmit;// all data transmit
 	};
 	static volatile	struct pri_compower_t	pri_compower;
-#endif /*PRIMAC_CONF_COMPOWER_SUPPORT CONTIKIMAC_CONF_COMPOWER */
+#endif
 
 
 /************************************************************************************************/
 /*------------------Begin: PRIMAC------------------*/ 
 /*Define*/
-
-//#define MAX_GRADE_SIZE		50
 #define DISPATCH			0
 #define NONDISPATCH		1
 
-
-//#define GRADE_BROADCAST_NUM	1 /*braodcasting or forwarding times of the grade message*/
 /*define packet type*/
 #define TYPE_GRADE		   0x10 //grade message
 #define TYPE_RTS		   0x11 //rts packet
 #define TYPE_CTS		   0x12 //cts packet
 //#define TYPE_ACK  		   0x13 //ack packet
 #define TYPE_DATA		   0x14 //data packet
+
 /*packet type related with MPDC*/
 #define TYPE_PROBE 			0x15 //probe message
 #define TYPE_PROBE_R		 0x16//probe ack message
@@ -103,16 +99,16 @@ static struct pt pt;
 
 static volatile uint8_t pdcadc_is_on = 0; /*typedef unsigned char   uint8_t;*/
 static volatile uint8_t pdcadc_keep_radio_on = 0;
-static volatile uint16_t num_paths = 0;/*the number of transmission paths*/
 
 static volatile unsigned char we_are_sending = 0;
 static volatile unsigned char radio_is_on = 0;
 
-
+// new added
+static volatile uint16_t num_paths = 0;/*the number of transmission paths*/
+static volatile radio_value_t channel_default = 26;
 
 enum{
 	NOUSE,
-		
 	/*node type*/
 	PRI_SINK, /*node type: sink*/
 	PRI_SENSOR, /*node type: sensor*/
@@ -120,13 +116,13 @@ enum{
 	CHILD_LIST, //The sender neighbor list
 	PARENT_LIST, //The receiver neighbor list
 };
-//#if ZOLERTIA_Z1
+
 #if LINKADDR_SIZE == 2
 	const linkaddr_t linkaddr_sink = { { 1, 0 } };
-#else /*LINKADDR_SIZE == 2*/
+#else
 #if LINKADDR_SIZE == 8
 	const linkaddr_t linkaddr_sink = { { 0x01,0,0,0,0,0,0,0 } };
-#endif /*LINKADDR_SIZE == 8*/
+#endif
 #endif /*LINKADDR_SIZE == 2*/
 
 /*Function Declaration*/
@@ -147,14 +143,6 @@ static char pri_powercycle(struct rtimer *t, void *ptr); /*function declaration*
 #define PRI_CCA_CHECK_TIME                     RTIMER_SECOND / 8192 // 2000
 #endif
 
-	/* CCA_SLEEP_TIME is the time between two successive CCA checks. */
-	/* Add 1 when rtimer ticks are coarse */
-
-#if RTIMER_SECOND > 8000
-#define PRI_CCA_SLEEP_TIME                     RTIMER_SECOND / 2000// 8192
-#else
-#define PRI_CCA_SLEEP_TIME                     (RTIMER_SECOND / 2000) + 1 
-#endif
 
 #ifndef IS_COOJA_SIM
 	#define	IS_COOJA_SIM	0
@@ -168,10 +156,6 @@ static char pri_powercycle(struct rtimer *t, void *ptr); /*function declaration*
 #define SF 6 // Sleep Factor, the least value of sleep factor is 2 (sleep_factor in the paper)
 #endif
 
-
-/* CHECK_TIME_TX is the total time it takes to perform CCA_COUNT_MAX_TX CCAs.  20*6=120*/
-//#define PRI_CHECK_TIME_TX                      (PRI_CCA_COUNT_MAX_TX * (PRI_CCA_CHECK_TIME + PRI_CCA_SLEEP_TIME))
-
 /*Begin: PRIMAC protocol parameters*/
 
 /*begin:The propagation time of grade message*/
@@ -180,6 +164,7 @@ static char pri_powercycle(struct rtimer *t, void *ptr); /*function declaration*
 #else
 	#define PRI_TM			0//0//(RTIMER_SECOND/455)//=72, 0.00219s
 #endif
+
 #define WAKEUP_ADVANCE_TIME		(RTIMER_SECOND/100) // 10ms wakeup advance time at the beginning of R state
 #define	R_END_GUARD_TIME	WAKEUP_ADVANCE_TIME // 10 ms guard time at the end of R state of the receiver 
 
@@ -196,14 +181,9 @@ static char pri_powercycle(struct rtimer *t, void *ptr); /*function declaration*
 
 #define WAIT_TO_SEND_RTS			(DIFS+(random_rand() % CW)*SIGMA) //time duration for waiting to send RTS
 #define WAIT_TO_SEND_GRADE		WAIT_TO_SEND_RTS //time duration for waiting to send the GRADE message
-//#define WAIT_TO_RCV_RTS			(DIFS+CW*SIGMA+PRI_CHECK_TIME_TX+DURRTS+ WAKEUP_ADVANCE_TIME+R_END_GUARD_TIME + GUARDTIME) //time duration for waiting to receiving RTS
 #define WAIT_TO_RCV_RTS			(DIFS+CW*SIGMA+DURRTS+ WAKEUP_ADVANCE_TIME+R_END_GUARD_TIME + GUARDTIME) //time duration for waiting to receiving RTS
-
 #define WAIT_TO_REG_BCAST_CTS			(SIFS+(random_rand()% CW)*SIGMA) //time duration for waiting to contend for replying with CTS gregularly
-//#define	WAIT_TO_BCAST_CTS_FOR_UNIT_RTS		(SIFS+random_rand() % UCAST_CTS_CW)//time duration for waiting to contend for replying with CTS after receiving a unicasted RTS not for me
 #define	WAIT_TO_UCAST_CTS			(SIFS) //time duration for waiting to unicast CTS
-
-//#define WAIT_TO_RCV_CTS			(SIFS+CW*SIGMA+DURCTS+GUARDTIME+PRI_CHECK_TIME_TX)
 #define WAIT_TO_RCV_CTS			(SIFS+CW*SIGMA+DURCTS+GUARDTIME)
 #define WAIT_TO_RCV_DATA		(SIFS+DURDATA+GUARDTIME)//+PRI_CHECK_TIME_TX) 
 
@@ -233,25 +213,22 @@ static volatile uint8_t state_left_second_round;
 #define	MAX_TRY_TO_FIND_PARENT  3 //	5 // for each valid "pri_attribute.sender_num_in_receivers", the maximum try to find receiver. 
 									  //When failing in all tries, increase "pri_attribute.sender_num_in_receivers" until to MAX_CHILD_NUM
 
-//#define PERIODIC_SECOND		10	/*everty 10s, send RTS*/
+
 #ifndef PERIODIC_CYCLES
 	#define	PERIODIC_CYCLES		3 /*every 10 cycles, send RTS*/
 #endif
 	
 /*everty the following cycles (corresponding to PERIODIC_SECOND), send RTS*/
-#define PERIODIC_BCAST_CYCLES_SENSOR	PERIODIC_CYCLES// ((PERIODIC_SECOND*(uint32_t)(RTIMER_SECOND))/DURCYCLE)// 10 //-1// 3 //20 cycles: after these cycles, broadcast the RTS again
-#define PERIODIC_BCAST_CYCLES_SINK	 (PERIODIC_CYCLES)//(((PERIODIC_SECOND/2)*(uint32_t)(RTIMER_SECOND))/DURCYCLE)// 3 //-1//20 cycles: after these cycles, broadcast the RTS again
-#define NORTS_CYCLES	(100*PERIODIC_BCAST_CYCLES_SENSOR)
-
+#define PERIODIC_BCAST_CYCLES_SENSOR	(PERIODIC_CYCLES)
+#define PERIODIC_BCAST_CYCLES_SINK	 (PERIODIC_CYCLES)
 
 #ifndef MAX_ACTIVE_CYCLES
 	#define MAX_ACTIVE_CYCLES		5	//maximum cycles for keeping active after determining its grade.
 #endif
 
 #ifndef RCV_GRADE_NUM_TO_SET
-	#define	RCV_GRADE_NUM_TO_SET	1 // 2 // 5 //when the node grade is or becomes -1, the node will wait such number +1 of receivings to determine its new grade
+	#define	RCV_GRADE_NUM_TO_SET	1 //when the node grade is or becomes -1, the node will wait such number +1 of receivings to determine its new grade
 #endif
-//#define MAX_CYCLE_COUNT	30
 
 /**
 *	switch of schedule synchronization module
@@ -272,13 +249,17 @@ static volatile uint8_t state_left_second_round;
 	#endif
 	#define	RANDOM_DRIFT_IN_COOJA_SUPPORT	0
 #endif
-
 /**
 *	switch of address-free module
-*/ 
-
+*/
 #ifndef PROC_GRADE_BASED_ON_ADDR_SUPPORT //this variable is also defined in Makefile
 	#define PROC_GRADE_BASED_ON_ADDR_SUPPORT	0  //process the grade message according to address (1) or transmission range (0)
+#endif
+
+#if	PROC_GRADE_BASED_ON_ADDR_SUPPORT
+#ifndef	NODES_NUM_PER_GRADE
+		#define NODES_NUM_PER_GRADE		3
+	#endif
 #endif
 
 #ifndef ADDRESS_FREE_SUPPORT
@@ -289,11 +270,7 @@ static volatile uint8_t state_left_second_round;
 	#define MAX_RID		254//The maximum random ID (2^8). Don't use 255 and 256 since 0 and 1 won't be used.
 #endif
             
-#if	PROC_GRADE_BASED_ON_ADDR_SUPPORT    
-	#ifndef	NODES_NUM_PER_GRADE
-		#define NODES_NUM_PER_GRADE		2
-	#endif
-#endif
+
 
 /**
 *	switch of mulitple channels module
@@ -306,9 +283,6 @@ static volatile uint8_t state_left_second_round;
     #ifndef NUM_CHANNELS
         #define NUM_CHANNELS 2	  //denoted by M in MPDC paper
     #endif
-//    #ifndef NUM_PATHS
-//		#define NUM_PATHS  3//denoted by N in MPDC paper
-//	#endif
     #ifndef MIN_HOPS_BETWEEN_ADJCENT_NODES
 		#define MIN_HOPS_BETWEEN_ADJCENT_NODES 4 //denoted by /sigma in MPDC paper
     #endif
@@ -319,27 +293,23 @@ static volatile uint8_t state_left_second_round;
     #define IS_NOT_STAGGER 0
 #endif
 
-
-
 /* The cycle time for announcements. */
 #ifndef START_GRADE
-	//#define START_GRADE (2 * CLOCK_SECOND) //0//(2 * CLOCK_SECOND) /*2s, 等待时间必须<=1s (why?)*/
-//	#ifdef MPDC_SUPPORT
-//		#define START_GRADE (2 * DURCYCLE)
-//	#else
 		#define START_GRADE  (2 * CLOCK_SECOND)
-//	#endif
 #endif
 #ifndef START_PROBE
 	#define START_PROBE (2 * CLOCK_SECOND)
 #endif
 
 
-
 /* the header of packet */
 struct pri_hdr_t {
   uint8_t dispatch; /* whether dispatch the packet */
   uint8_t type;/*the type of packet,such as RTS, CTS,DATA, etc.*/
+
+#ifdef  PROC_GRADE_BASED_ON_ADDR_SUPPORT
+ uint8_t source_assigned_id;
+#endif
 }__attribute__((packed));
 static const int hdr_len = sizeof(struct pri_hdr_t);
 
@@ -348,6 +318,7 @@ typedef int8_t pri_grade_t; //pdcadc grade type
 struct grade_msg_t{
 	pri_grade_t grade;//The grade of the current sending node
 	uint16_t state_dur;//The time that the sending node has been in the T state when sending IM
+
 #if MPDC_SUPPORT
 	linkaddr_t source;//Node ID or address of the current sending node
 	uint8_t channel_id;//The ID of the channel that the node is allocated with
@@ -359,12 +330,11 @@ struct grade_msg_t{
 struct rts_msg_t{//the structure of the rts message
 	pri_grade_t grade;
 	uint16_t state_dur;
-	int8_t not_for_data; //if this flag is set, the RTS/CTS is not for data transmission.
-	//uint8_t has_receiver; // indicate whether the neighbor list is empty
-
-	int8_t sender_num_in_receivers; // if lrts is broadcasted: if you have such a number of senders or less, please reply me, I'd like to be your sender
+	int8_t not_for_data; //1: RTS/CTS is not for data transmission.
+	int8_t sender_num_in_receivers; // if rts is broadcasted: if you have such a number of senders or less, please reply me, I'd like to be your sender
 									// if rts is unicasted: this is the number of senders my receiver has
 	int16_t clock_drift; //send the clock_drift between me and the receiver to the receiver
+
 }__attribute__((packed));
 
 struct cts_msg_t{//the structure of the cts message
@@ -415,12 +385,12 @@ struct cts_msg_t{//the structure of the cts message
 		uint32_t	delay;
 		uint32_t	ID; //data ID
 		uint8_t		has_temp; //indicate whether it has temperature or not
-	#if ZOLERTIA_Z1
+	//#if ZOLERTIA_RE
 		/*temperature:*/
 		char minus; 
 		int16_t  tempint; 
     	uint16_t tempfrac;
-	#endif
+	//#endif
 	}__attribute__((packed));
 	/* List of packets to be sent by pdcadc */
 	struct rdc_pri_buf {
@@ -459,36 +429,34 @@ struct pri_control_t{
 static volatile struct pri_control_t pri_control;
 
 
-/*attributes maintained by pdcadc for scheduling*/
+/*attributes maintained by mpdc for scheduling*/
 struct pri_attribute_t 
 {
 	pri_grade_t grade;/*grade the node is in.*/
 	pri_grade_t temp_grade; /*temporary grade*/
-	//pri_grade_t pre_grade;
-	char state;  /*node's current state \in {PRI_R, PRI_T,PRI_S}*/
+
+	char state;  /*node's current state \in {R, T,S}*/
 	rtimer_clock_t state_start; /*the start time of the current state*/
 
 	uint8_t	pri_type; /*the node type \in {PRI_SINK, PRI_SENSOR}*/
 	int8_t	forward_grade; /*flag: should forward grade message?*/
 	int8_t	periodic_rts_not_for_data_flag;
 	int8_t	clock_drift_rts_not_for_data_flag;
-	//int8_t  rcvd_rts_not_for_data;
 	int8_t	rcvd_cts_after_rts; //indicate whether the node has received a CTS after it broadcasted a RTS. Only in this case, the node can reply CTS for the received RTS.
-	//int8_t retx_time;
+
 	uint32_t data_gen_num; //the number of generated data
 	uint32_t data_rcvd_num_at_sink;
-	//uint16_t cycle_count;
+
 	int8_t	random_active_cycles; //don't use uint8_t, since this variable can be negative
 	uint8_t multiple_for_no_cts;
-	//uint8_t count_no_cts; //# of times that there is no CTS after broadcasting RTS
-	uint8_t	try_num_to_find_receiver; //Duing Broadcast, for each valid "pri_attribute.sender_num_in_receivers", 
+
+	uint8_t	try_num_to_find_receiver; //Duing Broadcast, for each valid "pri_attribute.sender_num_in_receivers",
 									  //record the number of try to find a receiver, until to its maximum: MAX_TRY_TO_FIND_PARENT. 
 	uint8_t cycle_count_periodic_bcast;//periodic send RTS
 	uint8_t cycle_count_no_rts; //if there is no rts received in R state, increase this counter, otherwise, set it to 0
 
 	uint8_t to_broadcast_rts; //flag to indicate the RTS is broadcasted or Unicasted. 0: unicast, 1: broadcast
 	uint8_t has_receiver;	// indicate whether the neighbor list of the current node is empty, used when sending RTS
-
 
 	uint8_t	rcv_grade_num_to_setgrade;//when the node grade becomes -1, the node will wait such number of receivings to determine its new grade
 	
@@ -501,6 +469,7 @@ struct pri_attribute_t
 	uint8_t retx_limit;
 #endif
 	int8_t	drift_per_cycle; // 0 or drift_direct
+
 #if RANDOM_DRIFT_IN_COOJA_SUPPORT && IS_COOJA_SIM
 	uint8_t drift_speed; //clock drift speed: every such cycles, +1/-1 drift generated
 	uint8_t	cycle_counter_for_cd; //cycle counter for clock drift
@@ -523,7 +492,10 @@ struct pri_attribute_t
 	packetbuf_attr_t rssi;
 	uint16_t temp_msg_state_dur;
 	rtimer_clock_t temp_now;
-	
+#endif
+
+#if PROC_GRADE_BASED_ON_ADDR_SUPPORT
+    uint8_t		assigned_id;
 #endif
 };
 
@@ -534,23 +506,20 @@ struct pri_attribute_t
 		pri_nodeid_t node_id;
 	}__attribute__((packed));
 #endif
-
-
-/*End: MPDC protocol parameters*/
-
 static volatile struct pri_attribute_t pri_attribute;
-
-
+/*End: MPDC protocol parameters*/
 
 /* List of neighborhood: receivers*/
 struct pri_neighbor_parent {
 	struct pri_neighbor_parent *next;
 	linkaddr_t receiver; //the next hop address
 	uint8_t	count_no_cts; //the times there are no cts received after unicasting RTS to that next hop node
+    uint8_t sender_num; //the number of senders the receiver has
+
 	int16_t clock_drift; //the clock_drift recorded last time when receiving a CTS
 	int16_t	cd_base; //clock_drift_base, initialized to 0, used when calculating clock_drift_speed
 	int32_t	cycle_counter; //(range: - (-2^31) ~ +  (+2^31-1) )
-	uint8_t sender_num; //the number of senders the receiver has
+
 };
 
 /* List of neighborhood: senders*/
@@ -558,23 +527,19 @@ struct pri_neighbor_child {
 	struct pri_neighbor_child *next;
 	linkaddr_t sender; //the sender hop address
 	uint8_t	count_no_rts; //the times there are not RTS unicasted to me. Don't count when receiving a broadcasted RTS
-	int16_t time_offset; //record the time_offset I used to sync with my receiver. I will embed it into the CTS replied to each sender
 
+	int16_t time_offset; //record the time_offset I used to sync with my receiver. I will embed it into the CTS replied to each sender
 	int16_t clock_drift_to_me; //this is to record the clock_drift between the sender and me. It's obtained from the RTS
 };
-
 
 #define MAX_PARENT_BUFS 1
 #define MAX_CHILD_BUFS	  MAX_CHILD_NUM_AT_SINK
 
+/*for both List and MEMB, need to define the structure first: rdc_pri_buf*/
+LIST(rdc_pri_buf_list);
 #if DATA_TX_SUPPORT
-	
-	/*for both List and MEMB, need to define the structure first: rdc_pri_buf*/
-	LIST(rdc_pri_buf_list);
 	MEMB(rdc_pri_buf_memb, struct rdc_pri_buf, MAX_DATA_QUEUE_BUFS);
 #else
-	/*for both List and MEMB, need to define the structure first: rdc_pri_buf*/
-	LIST(rdc_pri_buf_list);
 	MEMB(rdc_pri_buf_memb, int, 0);
 #endif
 
@@ -586,39 +551,35 @@ MEMB(pri_neighbor_child_memb, struct pri_neighbor_child, MAX_CHILD_BUFS);
 
 //#define TRANSFER_RTIMER_SECOND(remote_stick, remote_rtimer_second) 	((int16_t)((int32_t)remote_stick * (int32_t)RTIMER_SECOND / (int32_t)remote_rtimer_second))
 
-#define DEBUGA 0
-#if DEBUGA
-//#include <stdio.h>
-#define PRINTFA(...) printf(__VA_ARGS__)
-#define PRINTDEBUGA(...) printf(__VA_ARGS__)
+#define DEBUG_WARN 1
+#if DEBUG_WARN
+#define PRINTF_WARN(...) printf(__VA_ARGS__)
+#define PRINTDEBUG_WARN(...) printf(__VA_ARGS__)
 #else
-#define PRINTFA(...) 		
-#define PRINTDEBUGA(...)	
+#define PRINTF_WARN(...)
+#define PRINTDEBUG_WARN(...)
 #endif
 
-#define DEBUGB 0 // current printf
-#if DEBUGB
-//#include <stdio.h>
-#define PRINTFB(...) printf(__VA_ARGS__)
-#define PRINTDEBUGB(...) printf(__VA_ARGS__)
+#define DEBUG_INFO 1 // current printf
+#if DEBUG_INFO
+#define PRINTF_INFO(...) printf(__VA_ARGS__)
+#define PRINTDEBUG_INFO(...) printf(__VA_ARGS__)
 #else
-#define PRINTFB(...) 		
-#define PRINTDEBUGB(...)	
+#define PRINTF_INFO(...)
+#define PRINTDEBUG_INFO(...)
 #endif
 
 #define DEBUGLIST 1 // print list
 #if DEBUGLIST
-//#include <stdio.h>
 #define PRTLIST(...) printf(__VA_ARGS__)
-#define PRTLISTDEBUGB(...) printf(__VA_ARGS__)
+#define PRTLISTDEBUG_LIST(...) printf(__VA_ARGS__)
 #else
 #define PRTLIST(...) 		
-#define PRTLISTDEBUGB(...)	
+#define PRTLISTDEBUG_LIST(...)
 #endif
 
 #define DEBUG_OUTPUT 1 //print delay and packet reception ratio when a packet arrives at the sink node
 #if DEBUG_OUTPUT
-//#include <stdio.h>
 #define PRT_OUTPUT(...) printf(__VA_ARGS__)
 #define PRINTDEBUG_OUTPUT(...) printf(__VA_ARGS__)
 #else
@@ -628,18 +589,16 @@ MEMB(pri_neighbor_child_memb, struct pri_neighbor_child, MAX_CHILD_BUFS);
 
 #define DEBUG_OUTPUT_POWER 1 //print delay and packet reception ratio when a packet arrives at the sink node
 #if DEBUG_OUTPUT_POWER
-//#include <stdio.h>
 #define PRT_OUTPUT_POWER(...) printf(__VA_ARGS__)
 #define PRINTDEBUG_OUTPUT_POWER(...) printf(__VA_ARGS__)
 #else
 #define PRT_OUTPUT_POWER(...) 		
 #define PRINTDEBUG_OUTPUT_POWER(...)	
 #endif 
- 
- 
+
+
 #define DEBUG_DEF 1 //print definition
 #if DEBUG_DEF
-//#include <stdio.h>
 #define PRT_DEF(...) printf(__VA_ARGS__)
 #define PRINTDEBUG_DEF(...) printf(__VA_ARGS__)
 #else
@@ -648,20 +607,8 @@ MEMB(pri_neighbor_child_memb, struct pri_neighbor_child, MAX_CHILD_BUFS);
 #endif
 
 
-#define DEBUG_SYNC 1 //printf for synchronization
-#if DEBUG_SYNC
-//#include <stdio.h>
-#define PRT_FORSYNC(...) printf(__VA_ARGS__)
-#define PRINTDEBUG_FORSYNC(...) printf(__VA_ARGS__)
-#else
-#define PRT_FORSYNC(...) 		
-#define PRINTDEBUG_FORSYNC(...)	
-#endif
-
-
-#define DEBUG_JF 0 //
+#define DEBUG_JF 1 //
 #if DEBUG_JF
-//#include <stdio.h>
 #define PRTJF(...) printf(__VA_ARGS__)
 #else
 #define PRTJF(...) 		
@@ -670,9 +617,10 @@ MEMB(pri_neighbor_child_memb, struct pri_neighbor_child, MAX_CHILD_BUFS);
 /*------------------End: PRIMAC------------------*/
 
 /*---------------------------------------------------------------------------*/
-static void get_z1_temperature_to_set_data(struct data_msg_t * data_msg)
+static void get_re_temperature_to_set_data(struct data_msg_t * data_msg)
 {
-#if ZOLERTIA_Z1 && DATA_TX_SUPPORT
+    PRTJF("get_re_temperature_to_set_data() is called\n");
+#if ZOLERTIA_RE && DATA_TX_SUPPORT
 	int16_t  sign;
 	int16_t  raw;
 	uint16_t absraw;
@@ -680,98 +628,75 @@ static void get_z1_temperature_to_set_data(struct data_msg_t * data_msg)
 	data_msg->minus = ' ';
 
 	sign = 1;
- 
-	raw = tmp102_read_temp_raw();  // Reading from the sensor
- 
+    tmp102_read(&raw);
     absraw = raw;
     if (raw < 0) { // Perform 2C's if sensor returned negative data
         absraw = (raw ^ 0xFFFF) + 1;
         sign = -1;
     }
 	data_msg->tempint  = (absraw >> 8) * sign;
-    data_msg->tempfrac = ((absraw>>4) % 16) * 625; // Info in 1/10000 of degree
+    data_msg->tempfrac = ((absraw >> 4) % 16) * 625; // Info in 1/10000 of degree
     data_msg->minus = ((data_msg->tempint == 0) & (sign == -1)) ? '-'  : ' ' ;
 	data_msg->has_temp = 1;
 #endif
 }
 
 
-/*---------------------------------------------------------------------------*/
 /*
-*  \brief: 		show led according to node state
+*  \brief: 	show led according to node state
 *  \param: 	node state
 */
-//#include "lib/list.h"
+static void
+pri_show_led()
+{
+#if PRI_SHOW_LED_SUPPORT
+	unsigned char led_color;
+	if(pri_attribute.state == 'R')
+	{
+		leds_off(LEDS_ALL);
+		leds_on(LEDS_RED);
+	}else if(pri_attribute.state == 'S')
+	{
+		leds_off(LEDS_ALL);
+		leds_on(LEDS_BLUE);
+	}else
+	{
+		PRINTF_WARN("\n ERROR: In pri_show_led(): a wrong node state");
+	}
+#endif
+}
+
 static void pri_print_list(list_t list, uint8_t list_type)
 {
+    printf("pri_list() is called!\n");
+	if(list_head(list) == NULL)
+	{
+		return;
+	}
 #if DEBUGLIST
-	//printf("Print a List:\n"); 
 	if(list_type == CHILD_LIST)
 	{
 		struct pri_neighbor_child *l;
-		if(list_head(list) == NULL)
-		{
-			//Empty Child Table (Sender List)
-			//PRTLIST("EmptyCT\n");
-			return;
-		}
+
 		PRTLIST("CT ");//Child Table, i.e., SL: sender list
 		for(l = list_head(list); l != NULL; l = l->next)
 		{
-			//node address, cnr:count of no rts, time offset, clock_drift_to_me
 			PRTLIST("[%u %u %d %d]",l->sender.u8[0],l->count_no_rts,l->time_offset,l->clock_drift_to_me);
 		}
-		//PRTLIST("\n");
-		//ClockTime:
-		PRTLIST(" %lu\n",clock_time());
 	}else if(list_type == PARENT_LIST)
 	{
 		struct pri_neighbor_parent *l;
-		if(list_head(list) == NULL)
-		{
-			//Empty Parent Table (Receiver List)
-			//PRTLIST("EemptyPT\n");
-			return;
-		}
-		//PRTLIST("PT "); //Parent Table, i.e., RL: Receiver List
 		for(l = list_head(list); l != NULL; l = l->next)
 		{
 			//node address, count of no cts, cycle counter, clock drift, sender number of my receiver ([%u.%u cnc: %u \/ cc: %ld  cd: %d sn: %u])
 			PRTLIST("PT [%u %u %ld %d %u]\n",l->receiver.u8[0],l->count_no_cts,
 				l->cycle_counter, l->clock_drift, l->sender_num);
 		}
-		//ClockTime:
-		//PRTLIST(" %lu\n",clock_time());
 	}
+	PRTLIST(" %lu\n",clock_time());
  #endif 
 }
 
-static void
-pri_show_led()
-{
-#if PRI_SHOW_LED_SUPPORT
-	unsigned char led_color;
-	if(pri_attribute.state == 'R'
-	)
-	{
-		//led_color = LEDS_RED;
-		leds_off(LEDS_ALL);
-		leds_on(LEDS_RED);
-		//printf("i am here.\n");
-	}else if(pri_attribute.state == 'S'
-	)
-	{
-		//led_color = LEDS_BLUE;
-		leds_off(LEDS_ALL);
-		leds_on(LEDS_BLUE);
-	}else
-	{
-		PRINTFA("\n ERROR: In show_led: have a wrong node state");
-	}
-	//leds_off(LEDS_ALL);
-	//leds_on(led_color);
-#endif
-}
 
 	
 /*---------------------------------------------------------------------------*/
@@ -811,8 +736,6 @@ pri_compower_func(uint8_t	pkt_type)
 static void
 start_grade(void *ptr) 
 {
-    printf("hhctimer is expired,now send grade message\n");
-	//watchdog_stop();
 	uint32_t state_period;
 	state_period = pri_state_period();
 	pri_attribute.state_start = RTIMER_NOW();
@@ -821,11 +744,7 @@ start_grade(void *ptr)
 		rtimer_set(&rt, pri_attribute.state_start+ state_period, 1, (void (*)(struct rtimer *, void *))pri_powercycle, NULL); /*enter into 'S' state*/
 	}
 }
-static void
-start_test(void *ptr)
-{
-    printf("ctimer is expired,now send grade message\n");
-}
+
 /*---------------------------------------------------------------------------*/
 
 /*sink node(1.0) send probe message to learn all N neighbors*/
@@ -843,6 +762,9 @@ send_probe_message(){
 		hdr_ptr = packetbuf_hdrptr();
 		hdr_ptr->dispatch = DISPATCH;
 		hdr_ptr->type = TYPE_PROBE;
+#ifdef PROC_GRADE_BASED_ON_ADDR_SUPPORT
+		hdr_ptr->source_assigned_id = pri_attribute.assigned_id;
+#endif
 	}				
 	packetbuf_set_addr(PACKETBUF_ADDR_SENDER, &linkaddr_node_addr);
 	packetbuf_set_addr(PACKETBUF_ADDR_RECEIVER, &linkaddr_null);
@@ -882,6 +804,9 @@ send_probe_message_ack()
 		hdr_ptr = packetbuf_hdrptr();
 		hdr_ptr->dispatch = DISPATCH;
 		hdr_ptr->type = TYPE_PROBE_R;
+#ifdef PROC_GRADE_BASED_ON_ADDR_SUPPORT
+        hdr_ptr->source_assigned_id = pri_attribute.assigned_id;
+#endif
 	}		
 	packetbuf_set_addr(PACKETBUF_ADDR_SENDER, &linkaddr_node_addr);
 	packetbuf_set_addr(PACKETBUF_ADDR_RECEIVER, &linkaddr_sink);
@@ -920,6 +845,9 @@ send_nodeid_message() //只在pri_powercycle里调用
 		hdr_ptr = packetbuf_hdrptr();
 		hdr_ptr->dispatch = DISPATCH;
 		hdr_ptr->type = TYPE_NODEID;
+#ifdef PROC_GRADE_BASED_ON_ADDR_SUPPORT
+        hdr_ptr->source_assigned_id = pri_attribute.assigned_id;
+#endif
 	}	
 	pri_attribute.cnt++;
 	nodid_msg.node_id = pri_attribute.cnt;
@@ -945,7 +873,7 @@ send_nodeid_message() //只在pri_powercycle里调用
 
 #if MPDC_SUPPORT
 send_grade_mc(uint16_t state_dur,uint8_t order){
-	PRTJF("now state dur is %u \n",state_dur);
+	PRTJF("state dur is %u \n",state_dur);
 	struct pri_hdr_t *hdr_ptr;
 	struct grade_msg_t grade_msg, *data_ptr;
 	rtimer_clock_t now;
@@ -957,6 +885,9 @@ send_grade_mc(uint16_t state_dur,uint8_t order){
 		hdr_ptr = packetbuf_hdrptr();
 		hdr_ptr->dispatch = DISPATCH;
 		hdr_ptr->type = TYPE_GRADE;
+#ifdef PROC_GRADE_BASED_ON_ADDR_SUPPORT
+        hdr_ptr->source_assigned_id = pri_attribute.assigned_id;
+#endif
 	}		
 	packetbuf_set_datalen(sizeof(struct grade_msg_t));
 			
@@ -986,9 +917,9 @@ send_grade_mc(uint16_t state_dur,uint8_t order){
 		pri_compower_func(TYPE_GRADE_SINK);
 	}
 	//change channel after send grade message
-	const radio_value_t channel_t = cc2420_get_channel() - pri_attribute.channel_id;
-	int rd;
-	rd = NETSTACK_RADIO.set_value(RADIO_PARAM_CHANNEL, channel_t);
+	radio_value_t radio_channel = channel_default - pri_attribute.channel_id;
+    NETSTACK_RADIO.set_value(RADIO_PARAM_CHANNEL,radio_channel);
+
 	return ret_value;
 }
 #endif
@@ -1010,6 +941,9 @@ send_grade() //只在pri_powercycle里调用
 		hdr_ptr = packetbuf_hdrptr();
 		hdr_ptr->dispatch = DISPATCH;
 		hdr_ptr->type = TYPE_GRADE;
+#ifdef PROC_GRADE_BASED_ON_ADDR_SUPPORT
+        hdr_ptr->source_assigned_id = pri_attribute.assigned_id;
+#endif
 	}		
 	packetbuf_set_datalen(sizeof(struct grade_msg_t));
 			
@@ -1052,6 +986,9 @@ send_rts(const int8_t not_for_data) //只在pri_powercycle里调用
 		hdr_ptr = packetbuf_hdrptr();
 		hdr_ptr->dispatch = DISPATCH;
 		hdr_ptr->type = TYPE_RTS;
+#ifdef PROC_GRADE_BASED_ON_ADDR_SUPPORT
+        hdr_ptr->source_assigned_id = pri_attribute.assigned_id;
+#endif
 	}		
 	packetbuf_set_datalen(sizeof(struct rts_msg_t));
 			
@@ -1078,7 +1015,6 @@ send_rts(const int8_t not_for_data) //只在pri_powercycle里调用
 		now = RTIMER_NOW();
 		
 		data_ptr->state_dur = now - pri_attribute.state_start;
-
 
 		if(NETSTACK_RADIO.channel_clear() != 0)
 		{
@@ -1123,6 +1059,9 @@ send_cts()//(const linkaddr_t* dest_addr_ptr) //只在pri_powercycle里调用
 		hdr_ptr = packetbuf_hdrptr();
 		hdr_ptr->dispatch = DISPATCH;
 		hdr_ptr->type = TYPE_CTS;
+#ifdef PROC_GRADE_BASED_ON_ADDR_SUPPORT
+        hdr_ptr->source_assigned_id = pri_attribute.assigned_id;
+#endif
 	}		
 	packetbuf_set_datalen(sizeof(struct cts_msg_t));
 			
@@ -1134,18 +1073,6 @@ send_cts()//(const linkaddr_t* dest_addr_ptr) //只在pri_powercycle里调用
 	if(NETSTACK_FRAMER.create() >= 0) 
 	{
 		cts_msg.grade = pri_attribute.grade;
-	/*	struct pri_neighbor_child * s_tb = NULL;
-		s_tb=find_child_neighbor(&pri_control.sender_addr);
-		if(s_tb != NULL)
-		{
-			cts_msg.time_offset = s_tb->time_offset;
-			s_tb->time_offset = 0;
-		}else
-		{
-			cts_msg.time_offset = 0;
-		}
-		cts_msg.sender_num = list_length(pri_neighbor_child_list);
-        */
 		if(list_length(rdc_pri_buf_list) >= MAX_DATA_QUEUE_BUFS)
 		{
 			cts_msg.queue_is_full=1;
@@ -1206,6 +1133,9 @@ send_pridata(struct data_msg_t * data_elem, const linkaddr_t * dest_addr)
 		hdr_ptr = packetbuf_hdrptr();
 		hdr_ptr->dispatch = NONDISPATCH;
 		hdr_ptr->type = TYPE_DATA;
+#ifdef PROC_GRADE_BASED_ON_ADDR_SUPPORT
+        hdr_ptr->source_assigned_id = pri_attribute.assigned_id;
+#endif
   	}
 	packetbuf_set_datalen(sizeof(struct data_msg_t));
 	packetbuf_set_addr(PACKETBUF_ADDR_SENDER, &linkaddr_node_addr);//sender address
@@ -1230,6 +1160,7 @@ send_pridata(struct data_msg_t * data_elem, const linkaddr_t * dest_addr)
 static void
 pri_qsend_packet(mac_callback_t sent, void *ptr) //NETSTACK_RDC.send函数，调用的是该函数
 {
+    PRTJF("pri_qsend_packet() is called!\n");
 	// void *ptr: struct channel *c
 #if DATA_TX_SUPPORT && !GEN_DATA_IN_R/*Comment DATA_TX_SUPPORT, because we will use the code in pri_powercycle() to generate packet*/
 	if(list_head(pri_neighbor_parent_list)!=NULL && !pri_attribute.to_broadcast_rts && (pri_attribute.total_data_num > 0 || pri_attribute.total_data_num < 0)) /*generate data only when it's in unicast*/
@@ -1252,8 +1183,8 @@ pri_qsend_packet(mac_callback_t sent, void *ptr) //NETSTACK_RDC.send函数，调用的
 			data_msg.src_grade = pri_attribute.grade;
 			data_msg.delay = 0;
 			data_msg.has_temp = 0;
-		#if ZOLERTIA_Z1
-			//get_z1_temperature_to_set_data(&data_msg);
+		#if ZOLERTIA_RE || ZOLERTIA_Z1
+			get_re_temperature_to_set_data(&data_msg);
 		#endif
 			pri_attribute.data_gen_num++;
 			data_msg.ID = pri_attribute.data_gen_num;
@@ -1317,15 +1248,16 @@ static void pri_update_parent_neighbor(int16_t cts_time_offset, uint8_t cts_send
 	{
 		list_elem = memb_alloc(&pri_neighbor_parent_memb);
 		if(list_elem == NULL){
-	   		 PRINTFB("\nWe could not allocate memory!\n");
+            PRINTF_WARN("\nWe could not allocate memory!\n");
 	   		return;
 		}
     	list_elem->next = NULL;
 		linkaddr_copy(&list_elem->receiver,&pri_control.sender_addr);
     	list_elem->cycle_counter = 0; 
 		list_elem->sender_num = cts_sender_num + 1;
-		list_elem->cd_base = pri_control.clock_drift;
-		list_add(pri_neighbor_parent_list,list_elem);
+        list_elem->cd_base = pri_control.clock_drift;
+
+        list_add(pri_neighbor_parent_list,list_elem);
 	}
 	else //the rts might be unicasted
 	{
@@ -1335,9 +1267,10 @@ static void pri_update_parent_neighbor(int16_t cts_time_offset, uint8_t cts_send
 			{
 				linkaddr_copy(&list_elem->receiver,&pri_control.sender_addr);
 				list_elem->cycle_counter = 0;
-				list_elem->cd_base = 0;
 				list_elem->sender_num = cts_sender_num + 1;
-				PRINTFB("the sender changes its receiver from to %u.%u.\n",pri_control.sender_addr.u8[0],pri_control.sender_addr.u8[1]);
+
+                list_elem->cd_base = 0;
+                PRINTF_INFO("the sender changes its receiver from to %u.%u.\n",pri_control.sender_addr.u8[0],pri_control.sender_addr.u8[1]);
 			}else
 			{
 				return;
@@ -1362,9 +1295,9 @@ static void pri_update_parent_neighbor(int16_t cts_time_offset, uint8_t cts_send
 static void 
 pri_update_child_neighbor(void)
 {
-	struct pri_neighbor_child * list_elem=NULL;
+	struct pri_neighbor_child * list_elem = NULL;
 	int8_t first_rts;
-	first_rts=0;
+	first_rts = 0;
 	list_elem = find_child_neighbor(&pri_control.sender_addr);
 	if(list_elem == NULL)// the first time to receive an rts (more likely an broadcasted RTS)
 	{
@@ -1377,16 +1310,19 @@ pri_update_child_neighbor(void)
 		list_elem->next = NULL;
 		linkaddr_copy(&list_elem->sender,&pri_control.sender_addr);
 		list_elem->count_no_rts = 0;
+
 		list_elem->time_offset = 0;
 		list_elem->clock_drift_to_me = pri_control.clock_drift;
+
 		list_add(pri_neighbor_child_list,list_elem);
-		PRINTFB("Add a new sender to the neighbor_sender:%u.\n",list_elem->sender.u8[0]);
+        PRINTF_INFO("Add a new sender to the neighbor_sender:%u.\n",list_elem->sender.u8[0]);
 	}
 	if(list_elem == NULL)
 	{
 		return;
 	}
 	list_elem->clock_drift_to_me = pri_control.clock_drift; //update the clock_drift_to_me
+
 	if(!pri_control.rcvd_bro_rts)// a unicasted RTS
 	{
 		if(!first_rts)//not the first rts for me
@@ -1452,29 +1388,26 @@ pri_powercycle_turn_radio_on(void)
 static int16_t 
 find_true_offset(int16_t time_offset)
 {
+    PRINTF_INFO("find_true_offset() is called!\n");
 	struct pri_neighbor_child *s_tb;
 	int16_t temp_offset, min_offset;
 	min_offset = time_offset;
 	temp_offset = time_offset;
 	for(s_tb=list_head(pri_neighbor_child_list); s_tb!=NULL; s_tb=s_tb->next)
 	{
-		//printf("to:%d, s_cd:%d.\n",time_offset,s_tb->clock_drift_to_me);
 		if((time_offset + s_tb->clock_drift_to_me) >= ((int16_t)MAX_CLOCK_DRIFT))
 		{
-			//temp_offset = ((int16_t)MAX_CLOCK_DRIFT) + abs(s_tb->cd_difference_to_last) - s_tb->clock_drift_to_me;
 			temp_offset = (int16_t)MAX_CLOCK_DRIFT + 5 - s_tb->clock_drift_to_me;
-			//printf("1.temp_to:%d, cd: %d.\n",temp_offset, s_tb->clock_drift_to_me);
+			PRINTF_INFO("1.temp_to:%d, cd: %d.\n",temp_offset, s_tb->clock_drift_to_me);
 		}else if((time_offset + s_tb->clock_drift_to_me) <= -((int16_t)MAX_CLOCK_DRIFT))
 		{
-			//temp_offset = - ((int16_t)MAX_CLOCK_DRIFT) - abs(s_tb->cd_difference_to_last) - s_tb->clock_drift_to_me;
 			temp_offset = - (int16_t)MAX_CLOCK_DRIFT - 5 - s_tb->clock_drift_to_me;
-			//printf("2.temp_to:%d, cd: %d.\n",temp_offset, s_tb->clock_drift_to_me);
+            PRINTF_INFO("2.temp_to:%d, cd: %d.\n",temp_offset, s_tb->clock_drift_to_me);
 		}
 		if(abs(min_offset) > abs(temp_offset))
 		{
 			min_offset = temp_offset;
 		}
-		//s_tb->time_offset = time_offset;
 	}
 	return min_offset; 
 }
@@ -1728,7 +1661,7 @@ pri_powercycle(struct rtimer *r_t, void *ptr) //state of a new state
                             pri_powercycle_turn_radio_off();//pri_show_led();
                         }
 
-						//PRINTFB("Fail to send RTS: RADIO_TX_COLLISION: Channel is busy!\n");
+						//PRINTF_WARN("Fail to send RTS: RADIO_TX_COLLISION: Channel is busy!\n");
 						pri_control.pri_ret = MAC_TX_COLLISION;
 						random_init(linkaddr_node_addr.u8[0]); //initialize the random seed /*mar.12,2016*/
 					}
@@ -1789,7 +1722,7 @@ pri_powercycle(struct rtimer *r_t, void *ptr) //state of a new state
 				pri_attribute.has_receiver = 1;
 				pri_attribute.sender_num_in_receivers = -1; //I have found a relay, now change to -1 indicate it's unicast
 
-				PRTJF("broadcast_rts is %u.rcvd_cts %u.sender_num is %d.has_receiver is %u",
+				PRTJF("broadcast_rts is %u.rcvd_cts %u.sender_num is %d.has_receiver is %u \n",
 					pri_attribute.to_broadcast_rts,
 					pri_attribute.rcvd_cts_after_rts,
 					pri_attribute.sender_num_in_receivers,
@@ -1810,14 +1743,13 @@ pri_powercycle(struct rtimer *r_t, void *ptr) //state of a new state
 				{
 					if(pri_attribute.to_broadcast_rts && pri_attribute.sender_num_in_receivers >= MAX_CHILD_NUM && !pri_attribute.has_receiver)
 				 	{
-						 PRT_FORSYNC("Warning: Couldn't find a receiver. keep active. Free the neighbor receiver list.\n");
+                        PRINTF_WARN("Warning: Couldn't find a receiver. keep active. Free the neighbor receiver list.\n");
 					}
 					if(!pri_attribute.to_broadcast_rts && !pri_attribute.has_receiver)
 					{
-						 PRT_FORSYNC("Warning: Unicast, but no receiver. keep active. Free the neighbor receiver list.\n");
+                        PRINTF_WARN("Warning: Unicast, but no receiver. keep active. Free the neighbor receiver list.\n");
 					}
 					PRTJF("keep activate here !\n");
-					//pri_attribute.pre_grade = pri_attribute.grade;
 					pri_attribute.durslot = DURSLOT;
 					pri_attribute.dursleep = DURSLEEP;
 					pri_attribute.durcycle = DURCYCLE;
@@ -1915,28 +1847,21 @@ pri_powercycle(struct rtimer *r_t, void *ptr) //state of a new state
 				/*will do synchroization*/
 			#if PRI_SYNC_SUPPORT
 				
-				//static struct pri_neighbor_parent *r_tb; //receiver table
 				static struct pri_neighbor_child *s_tb;
-				if(pri_attribute.pri_type == PRI_SENSOR)/*only sensor will do synchronization*/
+				if(pri_attribute.pri_type == PRI_SENSOR)
 				{
-					if(pri_control.rcvd_cts)//??? pri_control.rcvd_cts : use this as a switch ? only after receiving a CTS
+					if(pri_control.rcvd_cts)//only after receiving a CTS
 					{
 						 
 						r_tb = list_head(pri_neighbor_parent_list);
-					    /*******************************************************************************************************************/
-						if(r_tb!=NULL && (abs(r_tb->clock_drift) >= (int16_t)MAX_CLOCK_DRIFT))// need to adjust clock: METHOD 1: adjust only when the threshold is reached
-						/*******************************************************************************************************************/
-						//if(r_tb!=NULL) //METHOD 2: adjust every time
-						{ 
-							
-							// update timeoffset
-							//if(r_tb->clock_drift_speed>0) //clock_drift_speed is calculated when receiving a cts and updating the receiver table
+					    if(r_tb!=NULL && (abs(r_tb->clock_drift) >= (int16_t)MAX_CLOCK_DRIFT))// need to adjust clock: METHOD 1: adjust only when the threshold is reached
+						{
 							if((r_tb->clock_drift - r_tb->cd_base)>0)//positive drift
 							{
 								/*single side:*/
 								time_offset = r_tb->clock_drift;// + MAX_CLOCK_DRIFT; 
 								/*double side:*/
-								//time_offset = r_tb->clock_drift + (int16_t)MAX_CLOCK_DRIFT; 
+								//time_offset = r_tb->clock_drift + (int16_t)MAX_CLOCK_DRIFT;
 								//printf("1.pos.to: %d.\n",time_offset);
 								time_offset = find_true_offset(time_offset);
 								//printf("2.pos.to: %d.\n",time_offset);
@@ -1946,19 +1871,12 @@ pri_powercycle(struct rtimer *r_t, void *ptr) //state of a new state
 									s_tb->time_offset = time_offset;
 									//printf("\n0. s_tb timeoffset=%d.\n",s_tb->time_offset);
 								}
-								 //PRT_FORSYNC("positive cds, synced, notify my each sender by CTS to=%d.\n",time_offset);
 
-								/********************************************************/
-
-								 //PRT_FORSYNC("SYNC: time_offset=%d . cycle_counter: %ld .\n",time_offset,r_tb->cycle_counter);
-								
 								//update cds, ccth, cd, and cc
-
-								/*******************************************************/
 								/*single side:*/
 								r_tb->clock_drift -= time_offset;
 								/*double side:*/
-								//r_tb->clock_drift = - (int16_t)MAX_CLOCK_DRIFT; //0;//update the clock drift of itself
+								 //0;//update the clock drift of itself
 								r_tb->cd_base = r_tb->clock_drift;
 								r_tb->cycle_counter = 0;
 							}
@@ -1978,12 +1896,10 @@ pri_powercycle(struct rtimer *r_t, void *ptr) //state of a new state
 								{
 									s_tb->time_offset = time_offset;
 								}
-								// PRT_FORSYNC("negative cds, synced, notify my each sender by CTS to=%d.\n",time_offset);
 
 								/********************************************************/
 
-								 //PRT_FORSYNC("SYNC: time_offset=%d . cycle_counter: %ld .\n",time_offset,r_tb->cycle_counter);
-								
+
 								//l->cycle_counter_threshold = 0;
 
 								/*******************************************************/
@@ -2015,12 +1931,9 @@ pri_powercycle(struct rtimer *r_t, void *ptr) //state of a new state
 							if((r_tb->clock_drift - r_tb->cd_base) != 0)
 							{	
 								//MAX_CYCLE_COUNTER/abs(l_need_send_rts->clock_drift - l_need_send_rts->cd_base) is actually the definition of the largest counter that leads to one drift
-								//PRT_FORSYNC("MAX cycle counter: %ld .\n",(int32_t)(MAX_CYCLE_COUNTER*MAX_CLOCK_DRIFT)/abs(l_need_send_rts->clock_drift - l_need_send_rts->cd_base));
 								if(r_tb->cycle_counter <= (int32_t)(MAX_CYCLE_COUNTER*MAX_CLOCK_DRIFT)/abs(r_tb->clock_drift - r_tb->cd_base))
 								{
-								 	//PRT_FORSYNC("send RTS for clock drift: cc: %ld , possible ccth: %ld .\n",l_need_send_rts->cycle_counter,
-								 	//	(MAX_CLOCK_DRIFT*l_need_send_rts->cycle_counter)/abs(l_need_send_rts->clock_drift- l_need_send_rts->cd_base));
-									if(r_tb->cycle_counter >= ((int32_t)MAX_CLOCK_DRIFT*r_tb->cycle_counter)/abs(r_tb->clock_drift- r_tb->cd_base))
+								 	if(r_tb->cycle_counter >= ((int32_t)MAX_CLOCK_DRIFT*r_tb->cycle_counter)/abs(r_tb->clock_drift- r_tb->cd_base))
 										//once the counter is larger than the threshold, send rts every this interval (RTS_FOR_SYNC_INTERVAL) until the counter is smaller than the threshold
 									{
 										pri_attribute.clock_drift_rts_not_for_data_flag = 1; //needs to send rts for resolve the clock drift. Maybe several RTSs are necessary until the clock drift is eliminated
@@ -2040,12 +1953,17 @@ pri_powercycle(struct rtimer *r_t, void *ptr) //state of a new state
 				{
 					pri_attribute.cycle_counter_for_cd = random_rand()%MAX_DRIFT_PER_CYCLE;//pri_attribute.drift_speed;
 					pri_attribute.drift_per_cycle = pri_attribute.drift_direct;
+					PRINTF_INFO("\n");
+					PRINTF_INFO("cd here lt 0，drift_per_cycle = %d\n",
+                   pri_attribute.drift_per_cycle);
 				}
+
 			#endif
 			}
             if(pri_attribute.pri_type == PRI_SENSOR) //sink has no receiver but only sender
             {
                 pri_print_list(pri_neighbor_parent_list,PARENT_LIST);
+                pri_print_list(pri_neighbor_child_list,CHILD_LIST);
             }
 		}
 		/*regular wakeup and in 'R' state*/
@@ -2121,9 +2039,6 @@ pri_powercycle(struct rtimer *r_t, void *ptr) //state of a new state
 								PT_YIELD(&pt);
 								pri_control.wait_data_timer_over = 1;
 							#endif
-
-							
-								//printf("2. rcv data.\n");
 							}
                             if(pri_attribute.pri_type == PRI_SENSOR){
                                 pri_powercycle_turn_radio_off();//pri_show_led();
@@ -2136,7 +2051,7 @@ pri_powercycle(struct rtimer *r_t, void *ptr) //state of a new state
                                 pri_powercycle_turn_radio_off();//pri_show_led();
                             }
 							random_init(linkaddr_node_addr.u8[0]); //initialize the random seed /*mar.12,2016*/
-							PRINTFB("RADIO_TX_COLLISION (reply with cts): Channel is busy!\n");
+                            PRINTF_WARN("RADIO_TX_COLLISION (reply with cts): Channel is busy!\n");
 						}
 					}
 				
@@ -2208,11 +2123,7 @@ pri_powercycle(struct rtimer *r_t, void *ptr) //state of a new state
 					    		pri_attribute.total_data_num--;
 					    		list_add(rdc_pri_buf_list, buf_elem); // add the item "list_elem" to the start of the list
 								//GDNum: Generated Data Number
-							//	PRT_OUTPUT("%lu G %u.%u %d %lu\n",
-                              //      clock_time(),
-                               //     linkaddr_node_addr.u8[0],linkaddr_node_addr.u8[1],
-                                //    pri_attribute.grade,
-                                 //   pri_attribute.data_gen_num);
+
 							}else
 							{
 								//printf("1. Generation drop data, Length:%d\n",list_length(rdc_pri_buf_list));
@@ -2228,10 +2139,12 @@ pri_powercycle(struct rtimer *r_t, void *ptr) //state of a new state
 			
 		}else
 		{
-			PRINTFB("ERROR: pri_state has a wrong value.\n");
+            PRINTF_WARN("ERROR: pri_state has a wrong value.\n");
 		}
 
-		/*start: below is to set the following schedule*/
+        PRINTF_INFO("here1, pri_attribute.drift_per_cycle = %u\n",pri_attribute.drift_per_cycle);
+
+        /*start: below is to set the following schedule*/
 		
 		//now = RTIMER_NOW();
 
@@ -2239,7 +2152,8 @@ pri_powercycle(struct rtimer *r_t, void *ptr) //state of a new state
 				now = RTIMER_NOW();
 				// t0 : the remain time
 				t0 = t0 - (now - pri_attribute.state_start);// + time_offset + pri_attribute.drift_per_cycle;
-				pri_attribute.drift_per_cycle = 0; 
+			    // WHY??
+				//	pri_attribute.drift_per_cycle = 0;
 
 				if(t0 > RTMAXTIMER)
 				{
@@ -2254,9 +2168,16 @@ pri_powercycle(struct rtimer *r_t, void *ptr) //state of a new state
 				}
 				//pri_schedule_powercycle_fixed(r_t, t0+time_offset + pri_attribute.drift_per_cycle); pri_attribute.drift_per_cycle = 0;
 			//	pri_schedule_powercycle_fixed(r_t, now + t0 + time_offset + pri_attribute.drift_per_cycle); 
+				
+			#if PRI_SYNC_SUPPORT
+				//pri_schedule_powercycle_fixed(r_t, now + t0 + time_offset + pri_attribute.drift_per_cycle);
+				PRINTF_INFO("here2, pri_attribute.drift_per_cycle = %u\n",pri_attribute.drift_per_cycle);
+				//pri_schedule_powercycle_fixed(r_t, now + t0  + pri_attribute.drift_per_cycle);
 				pri_schedule_powercycle_fixed(r_t, now + t0); 
-
-				pri_attribute.drift_per_cycle = 0;
+			#else
+				pri_schedule_powercycle_fixed(r_t, now + t0); 
+			#endif
+			//	pri_attribute.drift_per_cycle = 0;
 				PT_YIELD(&pt);//进程主动让出执行权
 	}
 	PT_END(&pt);
@@ -2289,7 +2210,7 @@ pri_state_period()
 		return pri_attribute.dursleep;
 	}else
 	{
-		PRINTFA("\nERROR: in pri_state_period: wrong priState.\n");
+        PRINTF_WARN("\nERROR: in pri_state_period: wrong priState.\n");
 		return 0;
 	}
 }
@@ -2297,29 +2218,26 @@ pri_state_period()
 static void print_definition(void)
 {
 #if 1
-	PRT_DEF("\n************************************************\n");
+	PRT_DEF("\n**** ********************************************\n");
 	PRT_DEF("MPDC_SUPPORT  = %u.\n",MPDC_SUPPORT);
-	PRT_DEF("2hhSTART_GRADE = %u\n",START_GRADE);
-
+	PRT_DEF("START_GRADE = %u\n",START_GRADE);
+	PRT_DEF("ZOLERTIA_RE = %u\n",ZOLERTIA_RE);
+    PRT_DEF("ZOLERTIA_Z1 = %u\n",ZOLERTIA_Z1);
 
 #if MPDC_SUPPORT
 	PRT_DEF("NUM_CHANNELS  = %u.\n",NUM_CHANNELS);
-//	PRT_DEF("NUM_PATHS	= %u.\n",NUM_PATHS);
 	PRT_DEF("MIN_HOPS_BETWEEN_ADJCENT_NODES  = %u.\n",MIN_HOPS_BETWEEN_ADJCENT_NODES);
 	PRT_DEF("IS_NOT_STAGGER  = %u.\n",IS_NOT_STAGGER);
 #endif
-	PRT_DEF("IS_NOT_STAGGER  = %u.\n",IS_NOT_STAGGER);
-	
-
-
 
 #if ZOLERTIA_Z1 || TMOTE_SKY || WISEMOTE || EXP5438
 	PRT_DEF("RTIMER_SECOND = %u. F_CPU=%lu.\n",RTIMER_SECOND,F_CPU);
 	PRT_DEF("CLOCK_SECOND=%u.\n",CLOCK_SECOND);
-#else		
+#else
 	PRT_DEF("RTIMER_SECOND = %u. ",RTIMER_SECOND);
-	PRT_DEF("F_CPU=%lu.\n",F_CPU);
-	PRT_DEF("RTIMER_ARCH_PRESCALER=%lu.\n",RTIMER_ARCH_PRESCALER);
+    PRT_DEF("ZOLERTIA_RE = %u\n",ZOLERTIA_RE);
+//	PRT_DEF("F_CPU=%lu.\n",F_CPU);//here
+//	PRT_DEF("RTIMER_ARCH_PRESCALER=%lu.\n",RTIMER_ARCH_PRESCALER);//here
 #endif
 	float f = ((float)DURSLOT*1.0)/((float)RTIMER_SECOND*1.0);
 	PRT_DEF("DURSLOT = %lu.",pri_attribute.durslot);
@@ -2336,31 +2254,40 @@ static void print_definition(void)
 	PRT_DEF("MAX_COUNT_NO_RTS_CTS = %u.\n",MAX_COUNT_NO_RTS_CTS);
 	PRT_DEF("MAX_CHILD_NUM = %u.\n",MAX_CHILD_NUM);
 	PRT_DEF("MAX_TRY_TO_FIND_PARENT = %u.\n",MAX_TRY_TO_FIND_PARENT);
-	//PRT_OUTPUT("DEFAULT_CYCLE_COUNTER_THRESHOLD = %lu.\n",DEFAULT_CYCLE_COUNTER_THRESHOLD);
-	    
+
 	PRT_DEF("\n**********Below is Related Settings**********\n");
 	PRT_DEF("PRIMAC_CONF_COMPOWER = %u.\n",PRIMAC_CONF_COMPOWER);
 	PRT_DEF("PRIMAC_CONF_COMPOWER_SUPPORT = %u.\n",PRIMAC_CONF_COMPOWER_SUPPORT);
 	PRT_DEF("SF = %u.\n",SF);
-//	PRT_DEF("PRI_SYNC_SUPPORT = %u.\n",PRI_SYNC_SUPPORT);
-//	PRT_DEF("RANDOM_DRIFT_IN_COOJA_SUPPORT = %u.\n",RANDOM_DRIFT_IN_COOJA_SUPPORT);
-//	PRT_DEF("ADCSC_SUPPORT = %u.\n",ADCSC_SUPPORT);
+
+    PRT_DEF("PRI_SYNC_SUPPORT = %u.\n",PRI_SYNC_SUPPORT);
+#if PRI_SYNC_SUPPORT
+	PRT_DEF("RANDOM_DRIFT_IN_COOJA_SUPPORT = %u.\n",RANDOM_DRIFT_IN_COOJA_SUPPORT);
+    PRT_DEF("MAX_DRIFT_PER_CYCLE = %u.\n",MAX_DRIFT_PER_CYCLE);
+    PRT_DEF("MAX_CLOCK_DRIFT = %u\n",MAX_CLOCK_DRIFT);
+#endif
+
+	//	PRT_DEF("ADCSC_SUPPORT = %u.\n",ADCSC_SUPPORT);
 	PRT_DEF("DATA_TX_SUPPORT = %u.\n",DATA_TX_SUPPORT);
 
 #if DATA_TX_SUPPORT
-	PRT_DEF("CYCLES_PER_PACKET = %u.\n",CYCLES_PER_PACKET); 
+	PRT_DEF("CYCLES_PER_PACKET = %u.\n",CYCLES_PER_PACKET);
 	PRT_DEF("DATA_INTERVAL = %u.\n",DATA_INTERVAL);
 	PRT_DEF("RETX_LIMIT = %u.\n",RETX_LIMIT);
 	PRT_DEF("TOTAL_DATA_NUM = %d.\n",TOTAL_DATA_NUM);
 	PRT_DEF("MAX_DATA_QUEUE_BUFS = %d.\n",MAX_DATA_QUEUE_BUFS);
-#endif	
+#endif
 
-//	PRT_DEF("PROC_GRADE_BASED_ON_ADDR_SUPPORT = %u.\n",PROC_GRADE_BASED_ON_ADDR_SUPPORT);
+	PRT_DEF("PROC_GRADE_BASED_ON_ADDR_SUPPORT = %u.\n",PROC_GRADE_BASED_ON_ADDR_SUPPORT);
+#if	PROC_GRADE_BASED_ON_ADDR_SUPPORT
+	PRT_DEF("NODES_NUM_PER_GRADE = %u.\n",NODES_NUM_PER_GRADE);
+#endif
 //	PRT_DEF("ADDRESS_FREE_SUPPORT = %u.\n",ADDRESS_FREE_SUPPORT);
 	PRT_DEF("IS_COOJA_SIM = %u.\n",IS_COOJA_SIM);
 //	PRT_DEF("CROSS_PLATFORM_SUPPORT = %u.\n",CROSS_PLATFORM_SUPPORT);
 	PRT_DEF("************************************************\n\n");
-#endif 
+
+#endif
 }
 
 /*---------------------------------------------------------------------------*/
@@ -2375,7 +2302,10 @@ pri_init(void)
   	//pdcadc_is_on= 1;
 	random_init(linkaddr_node_addr.u8[0]); //initialize the random seed
 
-#if ZOLERTIA_Z1
+	NETSTACK_RADIO.get_value(RADIO_PARAM_CHANNEL,&channel_default);//26
+	PRTJF("defaul channel is %u\n",channel_default);
+
+#if ZOLERTIA_RE || ZOLERTIA_Z1
 	tmp102_init();//temperature related.
 #endif
 #if DATA_TX_SUPPORT
@@ -2389,8 +2319,73 @@ pri_init(void)
 	
 	list_init(pri_neighbor_child_list);
 	memb_init(&pri_neighbor_child_memb);
-  	pri_attribute.pri_type = PRI_SENSOR;  
+#if PROC_GRADE_BASED_ON_ADDR_SUPPORT 
+	/*for real testbed, assign each board an ID for establishing expected topology*/
+	if(linkaddr_node_addr.u8[0] == 1)// z1 1.0 mote
+	{
+		pri_attribute.assigned_id = ID_FOR_RE_1;             
+	}else  
+	if(linkaddr_node_addr.u8[0]==2)  
+	{
+		pri_attribute.assigned_id = ID_FOR_RE_2;      
+	}else 
+	if(linkaddr_node_addr.u8[0]==3)
+	{
+		pri_attribute.assigned_id = ID_FOR_RE_3;
+	}else 
+	if(linkaddr_node_addr.u8[0]==4)
+	{
+		pri_attribute.assigned_id = ID_FOR_RE_4;
+	}else 
+	if(linkaddr_node_addr.u8[0]==5)
+	{
+		pri_attribute.assigned_id = ID_FOR_RE_5; 
+	}
+	else
+	if(linkaddr_node_addr.u8[0]== 6)
+	{
+		pri_attribute.assigned_id = ID_FOR_RE_6;
+	}else
+	if(linkaddr_node_addr.u8[0]== 7)
+	{
+		pri_attribute.assigned_id = ID_FOR_RE_7; 
+	}else
+	if(linkaddr_node_addr.u8[0]==8)
+	{
+		pri_attribute.assigned_id = ID_FOR_RE_8;
+	} else
+	if(linkaddr_node_addr.u8[0]==9)
+	{
+		pri_attribute.assigned_id = ID_FOR_RE_9;
+	} else
+	if(linkaddr_node_addr.u8[0]==10)
+	{
+		pri_attribute.assigned_id = ID_FOR_RE_10;
+	} else
+	if(linkaddr_node_addr.u8[0]==11)
+	{
+		pri_attribute.assigned_id = ID_FOR_RE_11; 
+	} else
+	if(linkaddr_node_addr.u8[0]==12)
+	{
+		pri_attribute.assigned_id = ID_FOR_RE_12; 
+	} else
+	if(linkaddr_node_addr.u8[0]==13)
+	{
+		pri_attribute.assigned_id = ID_FOR_RE_13; 
+	} else
+	if(linkaddr_node_addr.u8[0]==14)
+	{
+		pri_attribute.assigned_id = ID_FOR_RE_14; 
+	} else
+	if(linkaddr_node_addr.u8[0]==15)
+	{
+		pri_attribute.assigned_id = ID_FOR_RE_15; 
+	} 
+	PRTJF("pri_attribute.assigned_id = %u\n",pri_attribute.assigned_id);
+#endif
 	 
+  	pri_attribute.pri_type = PRI_SENSOR;/*two types:PRI_SENSOR and PRI_SINK.*/
 	on(); /*turn on the radio*/
 	pri_attribute.grade = -1;//need to reset when reset 
 	pri_attribute.temp_grade = -1;//need to reset when reset
@@ -2440,6 +2435,7 @@ pri_init(void)
 #endif
 	pri_attribute.fail_in_R = 0;
 	pri_attribute.drift_per_cycle = 0;//need to reset when reset
+
 #if RANDOM_DRIFT_IN_COOJA_SUPPORT && IS_COOJA_SIM//need to reset when reset
 	pri_attribute.drift_speed = random_rand()%MAX_DRIFT_PER_CYCLE; //clock drift speed
 	pri_attribute.drift_direct = 1;
@@ -2448,6 +2444,7 @@ pri_init(void)
 		pri_attribute.drift_direct = -pri_attribute.drift_direct;
 	}
 	pri_attribute.cycle_counter_for_cd = pri_attribute.drift_speed;
+	PRINTF_INFO("\n\nds = %u. dd = %d. \n",pri_attribute.drift_speed,pri_attribute.drift_direct);
 #endif
 
 
@@ -2456,7 +2453,7 @@ pri_init(void)
 	pri_show_led();//turn on corresonding led
 	if(linkaddr_cmp(&linkaddr_node_addr,&linkaddr_sink))
 	{/*\brief:		sink node (with mac address 1.0) will broadcast grade message*/
-		PRINTFB("I am sink, I will broadcast grade.\n");
+        PRINTF_INFO("I am sink, I will broadcast grade.\n");
 		pri_attribute.grade = 0; //sink node is in grade zero
 	  	pri_attribute.pri_type = PRI_SINK;
 		pri_attribute.forward_grade=1;
@@ -2465,13 +2462,13 @@ pri_init(void)
 	/*If multiple channels are supported, probe message should be sent before sending grade message */
 	#if MPDC_SUPPORT && !IS_NOT_STAGGER
 		pri_attribute.channel_id = 0;
-		PRTJF("call the send_probe_message :\t");
 		ctimer_set(&probe_start_ctimer, START_PROBE, send_probe_message, NULL);
 	#else
 		ctimer_set(&grade_start_ctimer, START_GRADE, start_grade, NULL);
 	#endif
 	}
-	
+
+//Set the channel of the sink nodes(except for sink1.0, because it keeps the original channel 26)
 #if MPDC_SUPPORT && !IS_NOT_STAGGER
 	int j;
 	for(j=2;j<=NUM_CHANNELS;j++){//2.0\3.0
@@ -2480,53 +2477,44 @@ pri_init(void)
 			pri_attribute.pri_type = PRI_SINK;
 			pri_attribute.grade = 0;
             pri_attribute.rcvd_cts_after_rts = 1;
-			pri_attribute.channel_id = j-1;
-			const radio_value_t channel_t = cc2420_get_channel() - pri_attribute.channel_id;
-	  		int rd;
-	  		rd = NETSTACK_RADIO.set_value(RADIO_PARAM_CHANNEL, channel_t);
-	  		printf("channel_t is %d. ret = %u.\t",channel_t,rd);
-	 		printf("now radio channel is %u\n",cc2420_get_channel());	
+			pri_attribute.channel_id = j-1;//mote 1.0 channel_id = 0,mote 2.0 channel_id = 1,and so on
+
+			//the default channel for all motes is 26.
+            radio_value_t radio_channel = channel_default - pri_attribute.channel_id;
+            //change to right channel. mote 2.0 will change to channel 25(26-1)
+            NETSTACK_RADIO.set_value(RADIO_PARAM_CHANNEL,radio_channel);
 		}
 	}
 #endif
 
+// when channel stagger is not supported, set channel for all nodes at the beginning
 #if MPDC_SUPPORT && IS_NOT_STAGGER
-
-	printf("IS_NOT_STAGGER is here\n");
 	if(NUM_CHANNELS != 1){
 		int j;
+		//set channel for sensor nodes(PRI_SENSOR)
 		if(linkaddr_node_addr.u8[0] > NUM_CHANNELS){
 			int tmp_grade = (linkaddr_node_addr.u8[0]-NUM_CHANNELS)/3;
 			pri_attribute.channel_id = (linkaddr_node_addr.u8[0] - (tmp_grade-1)*3 - NUM_CHANNELS)%NUM_CHANNELS;
-			const radio_value_t channel_t = cc2420_get_channel() - pri_attribute.channel_id;
-			int rd;
-			rd = NETSTACK_RADIO.set_value(RADIO_PARAM_CHANNEL, channel_t);
-			printf("channel_t is %d. ret = %u.\t",channel_t,rd);
-			printf("now radio channel is %u\n",cc2420_get_channel());	
+			radio_value_t radio_channel = channel_default - pri_attribute.channel_id;
+            NETSTACK_RADIO.set_value(RADIO_PARAM_CHANNEL,radio_channel);
 		}
-		for(j=2;j<=NUM_CHANNELS;j++){//2.0\3.0
+		//set channel for sink nodes(PRI_SINK)
 			if(linkaddr_node_addr.u8[0] == j){
-				PRINTFB("i am sink node too\n");
+				PRINTF_INFO("i am sink node too\n");
 				pri_attribute.pri_type = PRI_SINK;
 				pri_attribute.grade = 0;
 				pri_attribute.rcvd_cts_after_rts = 1;
 				pri_attribute.channel_id = j-1;
 				pri_attribute.forward_grade=1;
-				const radio_value_t channel_t = cc2420_get_channel() - pri_attribute.channel_id;
-				int rd;
-				rd = NETSTACK_RADIO.set_value(RADIO_PARAM_CHANNEL, channel_t);
-				printf("channel_t is %d. ret = %u.\t",channel_t,rd);
-				printf("now radio channel is %u\n",cc2420_get_channel());	
+
+				radio_value_t radio_channel = channel_default - pri_attribute.channel_id;
+                NETSTACK_RADIO.set_value(RADIO_PARAM_CHANNEL,radio_channel);
+				//sent timer to start send grade message
 				ctimer_set(&grade_start_ctimer, START_GRADE, start_grade, NULL);
 			}
 		}
-
 	}
 #endif
-	
-
-	printf("My address is %u.%u.\n",linkaddr_node_addr.u8[0],linkaddr_node_addr.u8[1]);
-
 }
 
 /*---------------------------------------------------------------------------*/
@@ -2585,7 +2573,7 @@ static uint32_t pri_grade_proc(char node_state, uint32_t sender_state_dur)
 		}
 	}else
 	{
-		PRINTFA("\nERROR: Unknown node state: %c!\n",node_state);
+        PRINTF_WARN("\nERROR: Unknown node state: %c!\n",node_state);
 	}
 	return state_dur;
 }
@@ -2788,7 +2776,6 @@ pri_input_packet(void)
 	rtimer_clock_t wt;
 	uint16_t	state_dur;
 	int16_t		offset_or_drift;
-//	PRTJF("called me!\n");
 	struct pri_hdr_t *hdr_ptr; /*define header pointer*/
 	//printf("0. Receive a packet.\n");
 	if(NETSTACK_FRAMER.parse() >= 0)
@@ -2796,7 +2783,45 @@ pri_input_packet(void)
 		
 		hdr_ptr = packetbuf_dataptr();
 		PRTJF("1. Receive a packet.and type is %u\n",hdr_ptr->type);
-		
+
+#ifdef PROC_GRADE_BASED_ON_ADDR_SUPPORT
+        uint16_t tmp_grade = (pri_attribute.assigned_id - NUM_CHANNELS - 1)/ NODES_NUM_PER_GRADE + 1;
+        printf("\n%u . %u tmpgrade = %u\n",
+               pri_attribute.assigned_id,
+               pri_attribute.assigned_id - NUM_CHANNELS,
+               tmp_grade);
+        if(pri_attribute.grade != -1){
+            tmp_grade = pri_attribute.grade;
+        }
+        uint8_t source_id = hdr_ptr->source_assigned_id;
+        PRTJF("\n tmp_grade = %u. source_id = %u. address = %u. data %u.%u.%u",
+              tmp_grade,
+              source_id,
+              packetbuf_addr(PACKETBUF_ADDR_SENDER)->u8[0],
+              source_id - NUM_CHANNELS,
+              (tmp_grade + 1) * NODES_NUM_PER_GRADE,
+              (tmp_grade - 2) * NODES_NUM_PER_GRADE
+              );
+        if(source_id <= NUM_CHANNELS){
+            if(tmp_grade != 1){
+                return;
+            }
+        }else{
+            uint8_t high = (tmp_grade + 1) * NODES_NUM_PER_GRADE;
+            uint8_t low = 0;
+            if(tmp_grade > 2){
+                low = (tmp_grade - 2) * NODES_NUM_PER_GRADE;
+            }
+            if((source_id - NUM_CHANNELS > high)
+               ||(source_id - NUM_CHANNELS <= low )
+                    ){
+                printf(" !return !\n");
+                return;//get a packet from undesired node
+            }
+        }
+        printf("\n");
+#endif
+
 		if(hdr_ptr->dispatch !=DISPATCH)
 		{
 			if(hdr_ptr->type == TYPE_DATA)
@@ -2853,7 +2878,6 @@ pri_input_packet(void)
 								
 							if(data_msg.has_temp==1)
 							{
-								//PRT_OUTPUT("%lu R %u.%u RPID: %lu Grade: %d Latency: %ld Num: 1 TotalRcvdNum: %lu\n", 
 								PRT_OUTPUT("%lu R %u.%u %lu %d %ld %lu\n",
 								clock_time(),
 								data_msg.src_addr.u8[0],data_msg.src_addr.u8[1],
@@ -2863,8 +2887,7 @@ pri_input_packet(void)
 								pri_attribute.data_rcvd_num_at_sink);
 							}else
 							{
-								//PRT_OUTPUT("%lu R %u.%u RPID: %lu Grade: %d Latency: %ld Num: 1 TotalRcvdNum: %lu\n", 
-								PRT_OUTPUT("%lu R %u.%u %lu %d %ld %lu\n", 
+								PRT_OUTPUT("%lu R %u.%u %lu %d %ld %lu\n",
 								clock_time(), data_msg.src_addr.u8[0],data_msg.src_addr.u8[1],data_msg.ID,data_msg.src_grade,data_msg.delay,pri_attribute.data_rcvd_num_at_sink);
 								
 							}
@@ -2899,8 +2922,8 @@ pri_input_packet(void)
 				}				
 				else				
     			{
-    				PRINTFB("rcv DATA: receive DATA but not in \'R\' or \'T\' state: 3.\n");
-    				//PRINTFA("\nERROR: Data is not for this node.node addres:%u.%u\n", rcv_addr.u8[0],rcv_addr.u8[1]);
+                    PRINTF_WARN("rcv DATA: receive DATA but not in \'R\' or \'T\' state: 3.\n");
+    				//PRINTF_WARN("\nERROR: Data is not for this node.node addres:%u.%u\n", rcv_addr.u8[0],rcv_addr.u8[1]);
     			}
 			}
 		}
@@ -2918,6 +2941,8 @@ control messages: grade/rts/cts/ack
 				//packetbuf_set_datalen(sizeof(struct grade_msg_t)); 
 				packetbuf_hdrreduce(hdr_len);
 				memcpy(&grade_msg, packetbuf_dataptr(),  sizeof(struct grade_msg_t));
+
+
 				if(pri_attribute.grade<0 )
 				{
 					state_dur = grade_msg.state_dur;
@@ -2945,8 +2970,9 @@ control messages: grade/rts/cts/ack
 				//packetbuf_set_datalen(sizeof(struct grade_msg_t)); 
 				packetbuf_hdrreduce(hdr_len);
 				memcpy(&grade_msg, packetbuf_dataptr(),  sizeof(struct grade_msg_t));
-				
-				if(pri_attribute.grade<0)
+
+
+                if(pri_attribute.grade<0)
 				{
 				//	printf("tf rcvd a grade message.\n");
 					state_dur = grade_msg.state_dur;
@@ -2986,7 +3012,8 @@ control messages: grade/rts/cts/ack
 					}
 					return;
 				}
-			#endif	
+            #endif
+
 
 				if(pri_attribute.grade<0)
 				{
@@ -3070,7 +3097,7 @@ control messages: grade/rts/cts/ack
 									
 				}else
 				{
-					 PRINTFB("rcv rts: receive RTS but not in \'R\' or \'T\' state: 3.\n");
+                    PRINTF_WARN("rcv rts: receive RTS but not in \'R\' or \'T\' state: 3.\n");
 				}
 
 
@@ -3085,9 +3112,12 @@ control messages: grade/rts/cts/ack
 				memcpy(&cts_msg, packetbuf_dataptr(),  sizeof(struct cts_msg_t));
 				state_dur = cts_msg.state_dur;
 				pri_control.msg_state_dur = state_dur+PRI_TM;
+
+
 				if(pri_attribute.grade<0)
+
 				{
-					PRINTFA("Receive an CTS message. The message is from: %u, grade: %u, sender_state_dur:%u.\n",
+                    PRINTF_WARN("Receive an CTS message. The message is from: %u, grade: %u, sender_state_dur:%u.\n",
 					pri_control.sender_addr,cts_msg.grade,state_dur);
 					pri_gdps(receiving_pkt_time, cts_msg.grade, 'R', state_dur);
 					
@@ -3127,7 +3157,6 @@ control messages: grade/rts/cts/ack
 							offset_or_drift = cts_msg.time_offset;
 
 							pri_update_parent_neighbor(offset_or_drift, cts_msg.sender_num); //here, we will reset count_no_CTS
-							//pri_update_parent_neighbor(TRANSFER_RTIMER_SECOND(cts_msg.time_offset, cts_msg.local_rtimer_second), cts_msg.sender_num); //here, we will reset count_no_CTS
 
 							#if 1
 	    					if(pri_control.wait_cts_timer_over == -1)//have set timer, and the timer is not over
@@ -3166,7 +3195,7 @@ control messages: grade/rts/cts/ack
 					}
 				}else
 				{
-					 PRINTFB("rcv cts: unexptected. 3");
+                    PRINTF_WARN("rcv cts: unexptected. 3");
 				}
 
 				
@@ -3174,10 +3203,11 @@ control messages: grade/rts/cts/ack
 
 		#if MPDC_SUPPORT && !IS_NOT_STAGGER
 			else if(hdr_ptr->type == TYPE_PROBE){
-				pri_compower_func(TYPE_PROBE); 
-				//only sensor node will recept this probe message, other sink nodes will ignore it
-				if(pri_attribute.pri_type == PRI_SENSOR){
+				pri_compower_func(TYPE_PROBE);
+				if(pri_attribute.pri_type == PRI_SENSOR)
+				{
 					linkaddr_t linkaddr_t;
+					PRTJF("send probe message ack\n");
 					random_init(linkaddr_node_addr.u8[0]);//wait a random time to send ack of probe message
 					ctimer_set(&probe_start_ctimer, random_rand() % CW, send_probe_message_ack, NULL);
 				}
@@ -3186,41 +3216,30 @@ control messages: grade/rts/cts/ack
 				pri_compower_func(TYPE_PROBE_R); 
 				if(linkaddr_cmp(packetbuf_addr(PACKETBUF_ADDR_RECEIVER), &linkaddr_node_addr)){
 					linkaddr_copy(&pri_control.sender_addr,packetbuf_addr(PACKETBUF_ADDR_SENDER));
-					//接收到数据，重置定时器
+					//reset the ctimer when receive the ack packet
 					ctimer_restart(&grade_start_ctimer);
 					send_nodeid_message();// send the order messgae
 					num_paths = pri_attribute.cnt;
-					printf("ctimer here cnt is %u,now time is %lu\n",
-						num_paths
-						,RTIMER_NOW());
-					if(ctimer_expired(&grade_start_ctimer)){
-						printf("ctimer is expired!\n");
-					}else{
-						printf("ctimer 222 is not expired!\n");
-					}
-
 				}
 			}
 			else if(hdr_ptr->type == TYPE_NODEID){
 				pri_compower_func(TYPE_NODEID); 
 				if(linkaddr_cmp(packetbuf_addr(PACKETBUF_ADDR_RECEIVER), &linkaddr_node_addr)){
-					//PRTJF("has receive my order!\n");
-					struct nodeid_msg_t nodeid_msg;	
-					//packetbuf_set_datalen(sizeof(struct cts_msg_t)); 
+					struct nodeid_msg_t nodeid_msg;	 
 					packetbuf_hdrreduce(hdr_len);
 					memcpy(&nodeid_msg, packetbuf_dataptr(),  sizeof(struct nodeid_msg_t));
 					pri_attribute.node_id = nodeid_msg.node_id;
-					PRTJF("has receive my order:%u!\n",pri_attribute.node_id);
+					PRTJF("receive my order:%u!\n",pri_attribute.node_id);
 				}
 			}
 		#endif
 			else
 			{
-				PRINTFA("pdcadc: Cannot determine the type of the received packet.\n");
+                PRINTF_WARN("pdcadc: Cannot determine the type of the received packet.\n");
 			}
 		}
 	}else{
-		PRINTFA("pdcadc: failed to parse (%u)\n", packetbuf_totlen());
+        PRINTF_WARN("pdcadc: failed to parse (%u)\n", packetbuf_totlen());
 	}
 }
 

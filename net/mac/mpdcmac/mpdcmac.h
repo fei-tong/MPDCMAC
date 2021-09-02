@@ -10,4 +10,4 @@
 #include "dev/radio.h"
 
 extern const struct rdc_driver mpdcmac_driver;
-#endif //CONTIKI_MPDCMAC_H
+#endif //MPDCMAC_H
